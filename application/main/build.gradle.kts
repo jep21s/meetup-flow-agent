@@ -23,6 +23,10 @@ dependencies {
   implementation(libs.bundles.kotlinx.coroutines)
   implementation(libs.koin.ktor)
   implementation(libs.bundles.ktor.server)
+  implementation(libs.ktor.client.core)
+  implementation(libs.ktor.client.cio)
+  implementation(libs.ktor.client.content.negotiation)
+  implementation(libs.jsoup)
 }
 
 tasks.register<Jar>("fatJar") {

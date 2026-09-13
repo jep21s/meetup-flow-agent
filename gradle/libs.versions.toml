@@ -21,6 +21,7 @@ ksp = "2.3.12"
 kotlinx-coroutines = "1.11.0"
 ktor = "3.5.2"
 
+json-schema-validator = "1.5.9"
 liquibase = "5.0.4"
 logback = "1.6.3"
 logstash-encoder = "9.0"
@@ -51,6 +52,8 @@ jackson-datatype = { module = "com.fasterxml.jackson.datatype:jackson-datatype-j
 
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 
+json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "json-schema-validator" }
+
 junit-kotlin = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "kotlinVersion" }
 junit-parametrized = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit-parametrized" }
 
@@ -79,6 +82,10 @@ ktor-server-host-common = { module = "io.ktor:ktor-server-host-common", version.
 ktor-server-status-pages = { module = "io.ktor:ktor-server-status-pages", version.ref = "ktor" }
 ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
 ktor-serialization-jackson = { module = "io.ktor:ktor-serialization-jackson", version.ref = "ktor" }
+
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 
 liquibase-core = { module = "org.liquibase:liquibase-core", version.ref = "liquibase" }
 

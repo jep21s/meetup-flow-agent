@@ -18,6 +18,10 @@ dependencies {
 
   implementation(libs.bundles.kotlinx.coroutines)
   implementation(libs.bundles.ktor.server)
+  implementation(libs.ktor.client.core)
+  implementation(libs.ktor.client.content.negotiation)
+  implementation(platform(libs.koin.bom))
+  implementation(libs.koin.core)
 
   testImplementation(libs.bundles.junit)
   testImplementation(libs.kotlinx.coroutines.test)
@@ -28,11 +32,14 @@ dependencies {
   testImplementation(libs.wiremock.standalone)
   testImplementation(platform(libs.testcontainers.bom))
   testImplementation(libs.testcontainers.postgresql)
+  testImplementation(libs.json.schema.validator)
   // Логи в тестах
   testRuntimeOnly(libs.logback)
 }
 
 tasks.test {
+  // KtorOpenAiLlmClient требует непустой llm.apiKey даже с MockEngine
+  environment("LLM_API_KEY", "test-key")
   jvmArgs = listOf(
     "--add-opens=java.base/java.time=ALL-UNNAMED",
     "--add-opens=java.base/java.lang=ALL-UNNAMED",
