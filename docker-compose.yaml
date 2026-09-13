@@ -1,7 +1,7 @@
 # Dev-окружение meetup-flow-agent (§17 COMMON_PLAN.md).
 # Приложение всегда запускается ВНЕ compose: ./gradlew :application:main:run
 # (предварительно `docker compose up -d postgres`).
-# jaeger/prometheus/grafana добавятся на этапе project.
+# jaeger/prometheus/grafana добавлены на этапе project (§17).
 #
 # Переменные ${DB_*} интерполируются из .env в корне (docker compose читает его
 # автоматически); постгрес-образу нужны canonical POSTGRES_* имена.
@@ -23,6 +23,28 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  grafana:
+    image: grafana/grafana:11.5.2
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
 
 volumes:
   pgdata:
