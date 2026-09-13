@@ -17,8 +17,10 @@ import org.jep21s.meetupflowagent.agent.context.SystemPromptBuilder
 import org.jep21s.meetupflowagent.agent.tools.AgentTool
 import org.jep21s.meetupflowagent.agent.tools.FetchWebPageTool
 import org.jep21s.meetupflowagent.config.restModule
+import org.jep21s.meetupflowagent.db.EventPersister
 import org.jep21s.meetupflowagent.llm.LlmClient
 import org.jep21s.meetupflowagent.testsupport.FakeChatClient
+import org.jep21s.meetupflowagent.testsupport.StubEventPersister
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -29,10 +31,12 @@ import org.koin.dsl.module
 class SyncAgentRouteTest {
 
   private lateinit var fake: FakeChatClient
+  private lateinit var persister: StubEventPersister
 
   @BeforeEach
   fun startKoinWithFakes() {
     fake = FakeChatClient()
+    persister = StubEventPersister.saved()
     startKoin {
       modules(
         module {
@@ -41,6 +45,7 @@ class SyncAgentRouteTest {
           single<ContextProvider> { FileContextProvider() }
           single { SystemPromptBuilder(get()) }
           single { SyncAgentService(get(), getAll(), get()) }
+          single<EventPersister> { persister }
         },
       )
     }
@@ -87,6 +92,11 @@ class SyncAgentRouteTest {
     assertThat(body).contains("Kotlin митап")
     assertThat(body).contains("\"toolCalls\"")
     assertThat(body).contains("fetch_web_page")
+    // ДЗ4: финальный ответ агента записан в память, результат отражён в DTO
+    assertThat(body).contains("\"memory\"")
+    assertThat(body).contains("\"type\":\"SAVED\"")
+    assertThat(persister.persistedReplies).hasSize(1)
+    assertThat(persister.persistedReplies.single()).contains("Kotlin митап")
 
     // история последнего запроса к LLM: system, user, assistant(tool_call), tool(observation);
     // финальный assistant-ответ циклом в историю уже не добавляется

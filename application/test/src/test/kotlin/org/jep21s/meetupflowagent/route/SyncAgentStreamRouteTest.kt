@@ -20,9 +20,11 @@ import org.jep21s.meetupflowagent.agent.context.SystemPromptBuilder
 import org.jep21s.meetupflowagent.agent.tools.AgentTool
 import org.jep21s.meetupflowagent.agent.tools.ToolResult
 import org.jep21s.meetupflowagent.config.restModule
+import org.jep21s.meetupflowagent.db.EventPersister
 import org.jep21s.meetupflowagent.llm.LlmClient
 import org.jep21s.meetupflowagent.starter.jackson.jacksonMapper
 import org.jep21s.meetupflowagent.testsupport.FakeChatClient
+import org.jep21s.meetupflowagent.testsupport.StubEventPersister
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -33,10 +35,12 @@ import org.koin.dsl.module
 class SyncAgentStreamRouteTest {
 
   private lateinit var fake: FakeChatClient
+  private lateinit var persister: StubEventPersister
 
   @BeforeEach
   fun startKoinWithFakes() {
     fake = FakeChatClient()
+    persister = StubEventPersister.saved()
     startKoin {
       modules(
         module {
@@ -46,6 +50,7 @@ class SyncAgentStreamRouteTest {
           single<ContextProvider> { FileContextProvider() }
           single { SystemPromptBuilder(get()) }
           single { SyncAgentService(get(), getAll(), get()) }
+          single<EventPersister> { persister }
         },
       )
     }
@@ -83,7 +88,7 @@ class SyncAgentStreamRouteTest {
 
     val events = parseSse(response.bodyAsText())
     assertThat(events.map { it.first }).containsExactly(
-      "tool_call", "tool_result", "reasoning_delta", "content_delta", "final",
+      "tool_call", "tool_result", "reasoning_delta", "content_delta", "final", "persisted",
     )
 
     val toolCall = events[0].second
@@ -100,6 +105,12 @@ class SyncAgentStreamRouteTest {
     assertThat(final.path("reply").asText()).contains("Kotlin митап")
     assertThat(final.path("iterations").asInt()).isEqualTo(2)
     assertThat(final.path("toolCalls").first().path("ok").asBoolean()).isTrue()
+
+    // ДЗ4: после final — событие persisted с результатом записи в память
+    val persisted = jacksonMapper.readTree(events[5].second)
+    assertThat(persisted.path("type").asText()).isEqualTo("SAVED")
+    assertThat(persisted.path("eventId").asText()).isNotEmpty
+    assertThat(persister.persistedReplies).hasSize(1)
 
     // стриминговый сценарий ходит через streamChat: запросы те же, история полная
     val lastRequest = fake.requests.last()
@@ -126,7 +137,7 @@ class SyncAgentStreamRouteTest {
     }
 
     val events = parseSse(response.bodyAsText())
-    assertThat(events.map { it.first }).containsExactly("reasoning_delta", "content_delta", "final")
+    assertThat(events.map { it.first }).containsExactly("reasoning_delta", "content_delta", "final", "persisted")
   }
 
   @Test
