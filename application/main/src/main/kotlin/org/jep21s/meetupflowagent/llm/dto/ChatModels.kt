@@ -30,11 +30,15 @@ data class ChatMessage(
   val toolCalls: List<ToolCall>? = null,
   @JsonProperty("tool_call_id")
   val toolCallId: String? = null,
+  /** CoT модели (GLM reasoning_content). Только читается из ответов провайдера — в исходящие запросы не сериализуется. */
+  @JsonProperty("reasoning_content", access = JsonProperty.Access.WRITE_ONLY)
+  val reasoningContent: String? = null,
 ) {
   companion object {
     fun system(text: String) = ChatMessage(role = ChatRole.SYSTEM, content = text)
     fun user(text: String) = ChatMessage(role = ChatRole.USER, content = text)
-    fun assistant(content: String?) = ChatMessage(role = ChatRole.ASSISTANT, content = content)
+    fun assistant(content: String?, reasoning: String? = null) =
+      ChatMessage(role = ChatRole.ASSISTANT, content = content, reasoningContent = reasoning)
     fun assistantToolCalls(calls: List<ToolCall>) =
       ChatMessage(role = ChatRole.ASSISTANT, content = null, toolCalls = calls)
 

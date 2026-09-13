@@ -36,10 +36,10 @@ class FakeChatClient(private val script: ArrayDeque<ChatCompletionResponse>) : L
 
   companion object {
 
-    /** Ответ с чистым текстом (финал агентского цикла). */
-    fun text(content: String): ChatCompletionResponse = ChatCompletionResponse(
+    /** Ответ с чистым текстом (финал агентского цикла); reasoning — опциональный CoT. */
+    fun text(content: String, reasoning: String? = null): ChatCompletionResponse = ChatCompletionResponse(
       choices = listOf(
-        Choice(message = ChatMessage.assistant(content), finishReason = "stop"),
+        Choice(message = ChatMessage.assistant(content, reasoning), finishReason = "stop"),
       ),
       usage = Usage(promptTokens = 10, completionTokens = 5),
     )
