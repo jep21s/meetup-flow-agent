@@ -23,6 +23,21 @@ dependencies {
   implementation(platform(libs.koin.bom))
   implementation(libs.koin.core)
 
+  // Testsupport (src/main этого модуля) поднимает Testcontainers-базу с Exposed+Hikari
+  implementation(platform(libs.exposed.bom))
+  implementation(libs.exposed.core)
+  implementation(libs.exposed.jdbc)
+  implementation(libs.exposed.java.time)
+  implementation(libs.exposed.json)
+  implementation(libs.hikaricp)
+  implementation(libs.postgresql.driver)
+  implementation(libs.liquibase.core)
+  implementation(libs.picocli)
+  implementation(libs.junit.kotlin)
+  implementation(libs.mockk)
+  implementation(platform(libs.testcontainers.bom))
+  implementation(libs.testcontainers.postgresql)
+
   testImplementation(libs.bundles.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.turbine)
@@ -38,8 +53,10 @@ dependencies {
 }
 
 tasks.test {
-  // KtorOpenAiLlmClient требует непустой llm.apiKey даже с MockEngine
+  // Клиенты требуют непустые ключи даже с MockEngine
   environment("LLM_API_KEY", "test-key")
+  environment("EMBEDDING_API_KEY", "test-embedding-key")
+  environment("EMBEDDING_FOLDER_ID", "test-folder")
   jvmArgs = listOf(
     "--add-opens=java.base/java.time=ALL-UNNAMED",
     "--add-opens=java.base/java.lang=ALL-UNNAMED",
