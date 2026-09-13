@@ -1,4 +1,3 @@
-import java.io.ByteArrayOutputStream
 
 plugins {
   alias(libs.plugins.kotlin.jvm) apply false
@@ -19,27 +18,18 @@ subprojects {
 }
 
 // Версия артефакта = git-тег текущего коммита; без тегов — 1.0-SNAPSHOT.
+// ProcessBuilder вместо project.exec{}: в Gradle 9.x exec-лямбда потеряла receiver.
 fun getGitVersion(): String {
   return try {
-    val tagOutput = ByteArrayOutputStream()
-    exec {
-      commandLine("git", "tag", "--points-at", "HEAD")
-      workingDir = rootDir
-      standardOutput = tagOutput
-      errorOutput = ByteArrayOutputStream()
-      isIgnoreExitValue = true
-    }
-
-    val tags = tagOutput.toString()
+    val tags = ProcessBuilder("git", "tag", "--points-at", "HEAD")
+      .directory(rootDir)
+      .start()
+      .inputStream.bufferedReader().readText()
       .lines()
       .map { it.trim() }
       .filter { it.isNotEmpty() }
 
-    if (tags.isEmpty()) {
-      return "1.0-SNAPSHOT"
-    }
-
-    tags.first()
+    tags.firstOrNull() ?: "1.0-SNAPSHOT"
   } catch (e: Exception) {
     "1.0-SNAPSHOT"
   }

@@ -7,7 +7,6 @@ import org.gradle.api.tasks.Optional
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.MapProperty
 import org.gradle.api.tasks.StopExecutionException
-import java.io.ByteArrayOutputStream
 
 abstract class DockerBuildTask : DefaultTask() {
 
@@ -67,20 +66,20 @@ abstract class DockerBuildTask : DefaultTask() {
 
     command.add(buildContext.get())
 
-    val outputStream = ByteArrayOutputStream()
-    val execResult = project.exec {
-      commandLine(command)
-      standardOutput = outputStream
-      errorOutput = outputStream
-      isIgnoreExitValue = true
-    }
+    // ProcessBuilder вместо project.exec{}: Project.exec удалён в Gradle 9.
+    val process = ProcessBuilder(command)
+      .directory(project.rootDir)
+      .redirectErrorStream(true)
+      .start()
+    val output = process.inputStream.bufferedReader().readText()
+    val exitCode = process.waitFor()
 
-    if (execResult.exitValue != 0) {
-      logger.error("Docker build failed:\n${outputStream}")
-      throw StopExecutionException("Docker build failed with exit code ${execResult.exitValue}")
+    if (exitCode != 0) {
+      logger.error("Docker build failed:\n$output")
+      throw StopExecutionException("Docker build failed with exit code $exitCode")
     }
 
     logger.lifecycle("Docker image built successfully: $fullImageName")
-    logger.quiet(outputStream.toString())
+    logger.quiet(output)
   }
 }

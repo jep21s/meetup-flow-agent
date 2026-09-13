@@ -2,12 +2,12 @@ plugins {
   id("build-jvm")
   id("idea-custom-plugin")
   id("build-koin")
-  id("io.insert-koin.compiler.plugin") version "0.3.0"
+  alias(libs.plugins.koin.compiler)
   application
 }
 
 kotlin {
-  jvmToolchain(21)
+  jvmToolchain(25)
 }
 
 val mainFile = "org.jep21s.meetupflowagent.MainKt"

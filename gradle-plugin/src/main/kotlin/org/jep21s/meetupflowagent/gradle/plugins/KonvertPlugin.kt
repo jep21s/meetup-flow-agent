@@ -13,7 +13,7 @@ import org.gradle.kotlin.dsl.getByType
 /**
  * Konvert (KSP codegen) для маппинга DTO ↔ модели.
  *
- * Требование к модулю: применить `id("com.google.devtools.ksp") version "2.3.2"` РЯДОМ с этим
+ * Требование к модулю: применить `alias(libs.plugins.ksp)` РЯДОМ с этим
  * плагином — KSP применяется потребителем, а не здесь (иначе конфликт порядка применения).
  *
  * Пост-обработка: после каждой KotlinCompile заменяет в сгенерированных Konvert файлах
