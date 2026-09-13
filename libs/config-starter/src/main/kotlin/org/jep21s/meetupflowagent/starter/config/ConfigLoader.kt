@@ -31,10 +31,11 @@ object ConfigLoader {
     }
 
     internal fun resolveEnvironmentVariables(value: String): String {
-        val regex = Regex("\\\$\\{(.+?)(?::(.+?))?\\}")
+        // ${VAR}, ${VAR:} (пустой дефолт) и ${VAR:default} — имя VAR не содержит ':'
+        val regex = Regex("\\$\\{([^}:]+)(?::([^}]*))?\\}")
         return regex.replace(value) { matchResult ->
             val (envVar, defaultValue) = matchResult.destructured
-            System.getenv(envVar) ?: defaultValue ?: ""
+            System.getenv(envVar) ?: defaultValue
         }
     }
 
