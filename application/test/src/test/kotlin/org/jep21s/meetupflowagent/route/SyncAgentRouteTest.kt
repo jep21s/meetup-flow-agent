@@ -11,6 +11,9 @@ import io.ktor.http.contentType
 import io.ktor.server.testing.testApplication
 import org.assertj.core.api.Assertions.assertThat
 import org.jep21s.meetupflowagent.agent.SyncAgentService
+import org.jep21s.meetupflowagent.agent.context.ContextProvider
+import org.jep21s.meetupflowagent.agent.context.FileContextProvider
+import org.jep21s.meetupflowagent.agent.context.SystemPromptBuilder
 import org.jep21s.meetupflowagent.agent.tools.AgentTool
 import org.jep21s.meetupflowagent.agent.tools.FetchWebPageTool
 import org.jep21s.meetupflowagent.config.restModule
@@ -35,7 +38,9 @@ class SyncAgentRouteTest {
         module {
           single<LlmClient> { fake }
           single<AgentTool> { FetchWebPageTool() }
-          single { SyncAgentService(get(), getAll()) }
+          single<ContextProvider> { FileContextProvider() }
+          single { SystemPromptBuilder(get()) }
+          single { SyncAgentService(get(), getAll(), get()) }
         },
       )
     }

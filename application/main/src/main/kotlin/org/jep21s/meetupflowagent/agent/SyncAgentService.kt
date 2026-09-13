@@ -1,5 +1,6 @@
 package org.jep21s.meetupflowagent.agent
 
+import org.jep21s.meetupflowagent.agent.context.SystemPromptBuilder
 import org.jep21s.meetupflowagent.agent.tools.AgentTool
 import org.jep21s.meetupflowagent.agent.tools.ToolPolicies
 import org.jep21s.meetupflowagent.agent.tools.ToolPolicyMode
@@ -7,7 +8,6 @@ import org.jep21s.meetupflowagent.agent.tools.ToolResult
 import org.jep21s.meetupflowagent.llm.LlmClient
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionRequest
 import org.jep21s.meetupflowagent.llm.dto.ChatMessage
-import org.jep21s.meetupflowagent.llm.dto.ChatRole
 import org.jep21s.meetupflowagent.llm.dto.FunctionSpec
 import org.jep21s.meetupflowagent.llm.dto.ToolSpec
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
@@ -40,12 +40,10 @@ data class AgentReply(
 class SyncAgentService(
   private val llmClient: LlmClient,
   private val tools: List<AgentTool>,
+  private val systemPromptBuilder: SystemPromptBuilder,
 ) {
 
-  private val systemPrompt: String =
-    this::class.java.classLoader.getResourceAsStream(SYSTEM_PROMPT_RESOURCE)
-      ?.bufferedReader()?.readText()
-      ?: throw IllegalStateException("System prompt resource not found: $SYSTEM_PROMPT_RESOURCE")
+  private val systemPrompt: String by lazy { systemPromptBuilder.build() }
 
   private val toolSpecs: List<ToolSpec> = tools.map { t ->
     ToolSpec(
@@ -62,15 +60,17 @@ class SyncAgentService(
       "llm.agent.model",
       "llm.agent.model is not configured",
     )
-    val messages = mutableListOf(
-      ChatMessage.system(systemPrompt),
-      ChatMessage.user(userText),
+    val state = ConversationState(
+      listOf(
+        ChatMessage.system(systemPrompt),
+        ChatMessage.user(userText),
+      ),
     )
     val toolCallsLog = mutableListOf<ToolCallRecord>()
 
     for (iteration in 1..MAX_ITERATIONS) {
       val response = llmClient.complete(
-        ChatCompletionRequest(model = model, messages = messages.toList(), tools = toolSpecs),
+        ChatCompletionRequest(model = model, messages = state.snapshot(), tools = toolSpecs),
       )
       val assistantMessage = response.firstMessage()
 
@@ -84,17 +84,16 @@ class SyncAgentService(
         )
       }
 
-      messages.add(assistantMessage)
+      state.add(assistantMessage)
       for (call in calls) {
         val observation = executeWithPolicy(call.function.name, call.function.arguments)
         toolCallsLog += observation.record
-        messages.add(ChatMessage.tool(call.id, observation.observationText))
+        state.add(ChatMessage.tool(call.id, observation.observationText))
       }
     }
 
     // Лимит исчерпан: возвращаем последний контент (или пометку), строгая валидация — этап 5.
-    val lastContent = messages.lastOrNull { it.role == ChatRole.ASSISTANT }
-      ?.content.orEmpty()
+    val lastContent = state.lastAssistantContent().orEmpty()
     return AgentReply(
       reply = lastContent.ifBlank {
         "Лимит итераций агента ($MAX_ITERATIONS) исчерпан до финального ответа."
@@ -158,7 +157,6 @@ class SyncAgentService(
   )
 
   companion object {
-    private const val SYSTEM_PROMPT_RESOURCE = "prompts/extractor-system.md"
     private const val MAX_ITERATIONS = 4
   }
 }
