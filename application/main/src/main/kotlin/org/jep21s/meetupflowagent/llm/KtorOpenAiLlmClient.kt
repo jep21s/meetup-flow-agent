@@ -18,7 +18,7 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.jackson.jackson
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.readUTF8Line
+import io.ktor.utils.io.readLine
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionRequest
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionResponse
 import org.jep21s.meetupflowagent.llm.dto.ChatMessage
@@ -193,7 +193,8 @@ class KtorOpenAiLlmClient(
 
     val dataLines = mutableListOf<String>()
     while (true) {
-      val line = channel.readUTF8Line(MAX_SSE_LINE) ?: break
+      // readUTF8Line устарел; readLine + ручной trim CR — устойчиво к LF и CRLF
+      val line = channel.readLine()?.trimEnd('\r') ?: break
       when {
         line.isEmpty() -> {
           if (dataLines.isNotEmpty()) {
@@ -250,9 +251,6 @@ class KtorOpenAiLlmClient(
 
   companion object {
     private const val DONE_MARKER = "[DONE]"
-
-    /** Дефолт readUTF8Line — 4096; чанк с длинной reasoning-дельтой может быть больше. */
-    private const val MAX_SSE_LINE = 256 * 1024
 
     fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
       install(HttpTimeout) {
