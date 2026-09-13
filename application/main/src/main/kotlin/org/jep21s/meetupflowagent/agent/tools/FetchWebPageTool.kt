@@ -110,7 +110,7 @@ class FetchWebPageTool(
         ALLOWED_CONTENT_TYPES.any { contentType.match(it) }
       if (!allowed) {
         return ToolResult.Error(
-          "Неподдерживаемый Content-Type: ${contentTypeHeader ?: "отсутствует"} " +
+          "Неподдерживаемый Content-Type: $contentTypeHeader " +
             "(разрешены text/html, text/plain, application/xhtml+xml)",
           "UNSUPPORTED_CONTENT_TYPE",
         )

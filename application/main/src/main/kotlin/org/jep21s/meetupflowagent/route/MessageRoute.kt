@@ -51,8 +51,7 @@ fun Route.messages() {
       ).let { return@post }
     }
 
-    val agentService: SyncAgentService = KoinPlatform.getKoin()?.get(SyncAgentService::class)
-      ?: throw IllegalStateException("Koin is not started; cannot resolve SyncAgentService")
+    val agentService: SyncAgentService = KoinPlatform.getKoin().get(SyncAgentService::class)
     val reply: AgentReply = agentService.process(text)
     call.respond(reply.toDto())
   }
