@@ -15,6 +15,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import org.jep21s.meetupflowagent.route.flows
 import org.jep21s.meetupflowagent.route.messages
 import org.jep21s.meetupflowagent.route.ping
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
@@ -60,6 +61,7 @@ fun Application.restModule() {
       requireTokenAuth(appToken)
       ping()
       messages()
+      flows()
     }
   }
 }
