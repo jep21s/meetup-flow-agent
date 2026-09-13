@@ -12,6 +12,7 @@ import org.jep21s.meetupflowagent.agent.context.SystemPromptBuilder
 import org.jep21s.meetupflowagent.agent.tools.AgentTool
 import org.jep21s.meetupflowagent.agent.tools.ToolPolicies
 import org.jep21s.meetupflowagent.agent.tools.ToolPolicyMode
+import org.jep21s.meetupflowagent.agent.tools.HumanInputRequiredException
 import org.jep21s.meetupflowagent.agent.tools.ToolResult
 import org.jep21s.meetupflowagent.db.DuplicateCandidate
 import org.jep21s.meetupflowagent.guardrails.GuardrailsService
@@ -31,6 +32,7 @@ import org.jep21s.meetupflowagent.llm.EmbeddingClient
 import org.jep21s.meetupflowagent.llm.EmbeddingException
 import org.jep21s.meetupflowagent.llm.LlmClient
 import org.jep21s.meetupflowagent.llm.LlmException
+import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.scheduler.RetrySchedule
 import org.jep21s.meetupflowagent.llm.StreamDelta
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionRequest
@@ -79,6 +81,8 @@ class AgentFlowService(
   private val embeddingClient: EmbeddingClient,
   private val guardrailsService: GuardrailsService,
   private val metrics: Metrics,
+  private val humanRequestRepository: org.jep21s.meetupflowagent.db.HumanRequestRepository,
+  private val proxyNotifier: org.jep21s.meetupflowagent.notify.ProxyNotifier,
 ) {
 
   private val systemPrompt: String by lazy { systemPromptBuilder.build() }
@@ -166,14 +170,27 @@ class AgentFlowService(
     return result
   }
 
+  /** Контекст резюма после ответа человека (§8.3): восстановленное состояние цикла. */
+  data class ResumeContext(
+    val state: ConversationState,
+    val iteration: Int,
+  )
+
   private suspend fun runLoop(
     flowId: UUID,
     message: String,
     model: String,
     emit: (suspend (AgentStreamEvent) -> Unit)?,
+    resume: ResumeContext? = null,
   ): FlowResult {
-    // Шаг 0: guardrails до агентского цикла (§8.1)
-    val guardrailsVerdict = guardrailsService.check(message)
+    // Шаг 0: guardrails до агентского цикла (§8.1); при резюме уже пройдены
+    val guardrailsVerdict = if (resume != null) {
+      org.jep21s.meetupflowagent.guardrails.GuardrailsVerdict(
+        org.jep21s.meetupflowagent.guardrails.GuardrailsVerdict.Verdict.PASS,
+      )
+    } else {
+      guardrailsService.check(message)
+    }
     metrics.guardrailsVerdict(guardrailsVerdict.verdict.name)
     val guardrailsSeq = flowStepRepository.appendStep(
       flowId = flowId,
@@ -216,7 +233,7 @@ class AgentFlowService(
       return result
     }
 
-    val state = ConversationState(
+    val state = resume?.state ?: ConversationState(
       listOf(
         ChatMessage.system(systemPrompt),
         ChatMessage.user(message),
@@ -225,7 +242,7 @@ class AgentFlowService(
     val toolCallsLog = mutableListOf<ToolCallRecord>()
     val progressDetector = ProgressDetector()
     val cycleLimiter = cycleLimiterFromConfig()
-    var iteration = 0
+    var iteration = startIterationContinuation(resume)
 
     while (true) {
       iteration++
@@ -282,7 +299,8 @@ class AgentFlowService(
       }
 
       state.add(assistantMessage)
-      for (call in calls) {
+      try {
+        for (call in calls) {
         emit?.invoke(AgentStreamEvent.ToolCall(call.function.name, call.function.arguments))
         flowStepRepository.appendStep(
           flowId = flowId,
@@ -290,7 +308,16 @@ class AgentFlowService(
           content = actionStep(call.function.name, call.function.arguments),
         )
         val toolStartedAt = System.nanoTime()
-        val observation = executeWithPolicy(call.function.name, call.function.arguments)
+        val observation = try {
+          executeWithPolicy(call.function.name, call.function.arguments)
+        } catch (e: HumanInputRequiredException) {
+          // тул не знает свой call-id — восполняем прерванный вызов для резюма
+          throw if (e.pendingToolCall != null) e
+          else HumanInputRequiredException(
+            e.question,
+            HumanInputRequiredException.PendingToolCall(call.id, call.function.name, call.function.arguments),
+          )
+        }
         val toolLatencyMs = (System.nanoTime() - toolStartedAt) / 1_000_000
         toolCallsLog += observation.record
         metrics.toolCall(call.function.name, if (observation.record.ok) "ok" else "error")
@@ -317,6 +344,12 @@ class AgentFlowService(
             errorCode = observation.record.errorCode,
           ),
         )
+        }
+      } catch (e: HumanInputRequiredException) {
+        // HITL (§8.3): снапшот → human_requests → WAITING_HUMAN → уведомление; корутина завершается
+        val result = suspendForHuman(flowId, e, state, iteration, toolCallsLog)
+        emit?.invoke(AgentStreamEvent.Final(result))
+        return result
       }
       // итерация цикла — допустимый самопереход PROCESSING → PROCESSING
       FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.PROCESSING)
@@ -329,25 +362,23 @@ class AgentFlowService(
         logger.info { "cycle limit extended: flowId=$flowId iteration=$iteration (${decision.reason})" }
       }
       if (decision.stop) {
+        // на project-этапе кап циклов — вопрос человеку (§8.4), а не NEEDS_REVIEW
         metrics.reactCycles(iteration)
-        FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.COMPLETED)
-        val verdict = Verdict(VerdictStatus.NEEDS_REVIEW, listOf("CYCLE_LIMIT"))
-        flowRepository.updateStatus(
+        val question = jacksonMapper.createObjectNode().apply {
+          put("question", "Цикл агента остановлен после $iteration итераций: ${decision.reason}. " +
+            "Уточните недостающие данные о мероприятии (дата/место/регистрация) или подтвердите, что данных нет.")
+          put("contextSummary", state.lastAssistantContent()?.take(300) ?: "")
+          putArray("options").apply {
+            add("Данных достаточно — завершить с NEEDS_REVIEW")
+          }
+        }
+        val result = suspendForHuman(
           flowId,
-          FlowStatus.COMPLETED.name,
-          lastError = decision.reason,
-          verdict = verdictJson(verdict),
-        )
-        logger.warn { "flow stopped by cycle limiter: flowId=$flowId iterations=$iteration (${decision.reason})" }
-        val result = FlowResult(
-          flowId = flowId,
-          status = FlowStatus.COMPLETED,
-          verdictStatus = VerdictStatus.NEEDS_REVIEW,
-          reasons = verdict.reasons,
-          reply = state.lastAssistantContent().orEmpty(),
-          toolCalls = toolCallsLog,
-          iterations = iteration,
-          limitReached = true,
+          HumanInputRequiredException(question, pendingToolCall = null),
+          state,
+          iteration,
+          toolCallsLog,
+          capLimit = true,
         )
         emit?.invoke(AgentStreamEvent.Final(result))
         return result
@@ -518,6 +549,113 @@ class AgentFlowService(
     }
   }
 
+  /**
+   * Переводит флоу в WAITING_HUMAN: полный снапшот цикла в state_snapshot,
+   * вопрос в human_requests, шаг HUMAN_ASK, уведомление прокси. Корутина
+   * завершается — процесс не блокируется (§8.3).
+   */
+  private suspend fun suspendForHuman(
+    flowId: UUID,
+    e: HumanInputRequiredException,
+    state: ConversationState,
+    iteration: Int,
+    toolCallsLog: List<ToolCallRecord>,
+    capLimit: Boolean = false,
+  ): FlowResult {
+    val snapshot = jacksonMapper.createObjectNode().apply {
+      put("snapshotVersion", 1)
+      put("iteration", iteration)
+      put("capLimit", capLimit)
+      e.pendingToolCall?.let { pending ->
+        putObject("pendingToolCall").apply {
+          put("id", pending.id)
+          put("name", pending.name)
+          put("arguments", pending.arguments)
+        }
+      }
+      putArray("messages").apply {
+        state.snapshot().forEach { add(jacksonMapper.valueToTree<JsonNode>(it)) }
+      }
+    }
+    humanRequestRepository.create(flowId, e.question)
+    flowStepRepository.appendStep(
+      flowId = flowId,
+      type = FlowStepType.HUMAN_ASK,
+      content = e.question,
+      snapshot = snapshot,
+    )
+    FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.WAITING_HUMAN)
+    flowRepository.updateStatus(flowId, FlowStatus.WAITING_HUMAN.name)
+    proxyNotifier.notify(
+      ProxyNotification(
+        flowId = flowId,
+        event = "HUMAN_INPUT_REQUIRED",
+        userIds = emptyList(),
+        text = e.question.path("question").asText(),
+        options = e.question.path("options").mapNotNull { it.takeIf { it.isTextual }?.asText() },
+      ),
+    )
+    logger.info { "flow waiting human: flowId=$flowId iteration=$iteration capLimit=$capLimit" }
+    return FlowResult(
+      flowId = flowId,
+      status = FlowStatus.WAITING_HUMAN,
+      verdictStatus = VerdictStatus.NEEDS_REVIEW,
+      reasons = listOf(if (capLimit) "CYCLE_LIMIT" else "HUMAN_INPUT_REQUIRED"),
+      reply = state.lastAssistantContent().orEmpty(),
+      toolCalls = toolCallsLog,
+      iterations = iteration,
+    )
+  }
+
+  /**
+   * Резюм после ответа человека (§8.3): ответ добавляется как observation к
+   * прерванному tool_call и цикл продолжается; для cap-вопроса (без
+   * прерванного вызова) флоу завершается NEEDS_REVIEW с зафиксированным
+   * ответом.
+   */
+  suspend fun resume(flowId: UUID, answer: String): FlowResult {
+    val flow = flowRepository.findById(flowId)
+      ?: error("flow $flowId not found")
+    check(flow.status == FlowStatus.WAITING_HUMAN.name) { "flow $flowId is not WAITING_HUMAN (status=${flow.status})" }
+    val snapshot = flow.stateSnapshot ?: error("flow $flowId has no state snapshot to resume")
+
+    val messages = snapshot.path("messages").map { jacksonMapper.treeToValue(it, ChatMessage::class.java) }
+    val state = ConversationState(messages)
+    val iteration = snapshot.path("iteration").asInt()
+    val pending = snapshot.path("pendingToolCall").takeIf { it.isObject }
+
+    flowStepRepository.appendStep(
+      flowId = flowId,
+      type = FlowStepType.HUMAN_ANSWER,
+      content = jacksonMapper.createObjectNode().apply { put("answer", answer.take(2000)) },
+    )
+
+    if (pending == null) {
+      // cap-вопрос: подтверждение человека — финализируем NEEDS_REVIEW с ответом
+      FlowTransitions.checkTransition(FlowStatus.WAITING_HUMAN, FlowStatus.COMPLETED)
+      val verdict = Verdict(VerdictStatus.NEEDS_REVIEW, listOf("CYCLE_LIMIT", "HUMAN_ANSWERED"))
+      flowRepository.updateStatus(
+        flowId,
+        FlowStatus.COMPLETED.name,
+        lastError = "human answered cap-limit question: ${answer.take(200)}",
+        verdict = verdictJson(verdict),
+      )
+      metrics.flowStatus(FlowStatus.COMPLETED.name)
+      return FlowResult(flowId, FlowStatus.COMPLETED, VerdictStatus.NEEDS_REVIEW, verdict.reasons, reply = answer)
+    }
+
+    FlowTransitions.checkTransition(FlowStatus.WAITING_HUMAN, FlowStatus.PROCESSING)
+    flowRepository.updateStatus(flowId, FlowStatus.PROCESSING.name)
+    state.add(
+      ChatMessage.tool(
+        pending.path("id").asText(),
+        "Ответ человека: ${answer.take(2000)}",
+      ),
+    )
+    val model = ConfigLoader.getRequiredProperty("llm.agent.model", "llm.agent.model is not configured")
+    return runLoop(flowId, "", model, emit = null, resume = ResumeContext(state, iteration))
+  }
+
   // --- JSON шагов/снапшота ---
 
   /**
@@ -560,6 +698,8 @@ class AgentFlowService(
       parsed.dto.registrationUrl?.let { add("registrationUrl=$it") }
     }
   }
+
+  private fun startIterationContinuation(resume: ResumeContext?): Int = resume?.iteration ?: 0
 
   private fun cycleLimiterFromConfig(): CycleLimiter = CycleLimiter(
     baseLimit = ConfigLoader.getProperty("react.baseLimit", "8").toInt(),

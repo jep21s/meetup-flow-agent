@@ -4,12 +4,15 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.jep21s.meetupflowagent.agent.context.FileContextProvider
 import org.jep21s.meetupflowagent.agent.context.SystemPromptBuilder
+import org.jep21s.meetupflowagent.agent.tools.AskHumanTool
 import org.jep21s.meetupflowagent.agent.tools.SearchDuplicateTool
 import org.jep21s.meetupflowagent.db.EventRepository
 import org.jep21s.meetupflowagent.db.EventRow
 import org.jep21s.meetupflowagent.db.FlowRepository
 import org.jep21s.meetupflowagent.db.FlowStepRepository
 import org.jep21s.meetupflowagent.db.FlowStepType
+import io.mockk.coEvery
+import io.mockk.mockk
 import org.jep21s.meetupflowagent.guardrails.GuardrailsService
 import org.jep21s.meetupflowagent.guardrails.GuardrailsVerdict
 import org.jep21s.meetupflowagent.llm.EmbeddingClient
@@ -61,6 +64,8 @@ class AgentFlowServiceIT : PostgresTestBase() {
       embeddingClient = embedder,
       guardrailsService = passGuardrails,
       metrics = metrics,
+      humanRequestRepository = humanRequestRepository,
+      proxyNotifier = noopNotifier,
     )
 
   private val passGuardrails: GuardrailsService = io.mockk.mockk {
@@ -68,6 +73,10 @@ class AgentFlowServiceIT : PostgresTestBase() {
   }
 
   private val metrics = Metrics.inMemory()
+
+  private val humanRequestRepository = org.jep21s.meetupflowagent.db.HumanRequestRepository(testConnectivity())
+
+  private val noopNotifier = io.mockk.mockk<org.jep21s.meetupflowagent.notify.ProxyNotifier>(relaxed = true)
 
   @Test
   fun `happy path - search tool then APPROVED final to COMPLETED with event and steps`() {
@@ -170,7 +179,7 @@ class AgentFlowServiceIT : PostgresTestBase() {
   }
 
   @Test
-  fun `stalled cycle stops at base limit with CYCLE_LIMIT`() {
+  fun `stalled cycle asks human and cap answer finalizes NEEDS_REVIEW`() {
     // одинаковый tool_call каждую итерацию: сигнатура не меняется 2 цикла → прогресса нет
     repeat(8) {
       fake.enqueue(
@@ -184,13 +193,86 @@ class AgentFlowServiceIT : PostgresTestBase() {
 
     val result = runBlocking { service(ScriptedEmbedder(unit(5))).run("бесконечный цикл") }
 
-    assertThat(result.status).isEqualTo(FlowStatus.COMPLETED)
-    assertThat(result.verdictStatus.name).isEqualTo("NEEDS_REVIEW")
-    assertThat(result.reasons).containsExactly("CYCLE_LIMIT")
-    assertThat(result.limitReached).isTrue()
+    // project-этап: кап циклов → ask_human (WAITING_HUMAN), не финал
+    assertThat(result.status).isEqualTo(FlowStatus.WAITING_HUMAN)
+    assertThat(result.reasons).contains("CYCLE_LIMIT")
     assertThat(result.iterations).isEqualTo(8)
     val flow = runBlocking { flowRepository.findById(result.flowId) }
-    assertThat(flow!!.lastError).contains("no progress")
+    assertThat(flow!!.status).isEqualTo("WAITING_HUMAN")
+    val snap = flow.stateSnapshot
+    assertThat(snap).isNotNull
+    assertThat(snap!!.path("capLimit").asBoolean()).isTrue()
+    assertThat(snap.path("messages").size()).isGreaterThan(0)
+
+    // ответ человека на cap-вопрос → COMPLETED / NEEDS_REVIEW / HUMAN_ANSWERED
+    val resumed = runBlocking {
+      service(ScriptedEmbedder(unit(5))).resume(result.flowId, "Данных нет, завершайте")
+    }
+    assertThat(resumed.status).isEqualTo(FlowStatus.COMPLETED)
+    assertThat(resumed.verdictStatus.name).isEqualTo("NEEDS_REVIEW")
+    assertThat(resumed.reasons).contains("CYCLE_LIMIT", "HUMAN_ANSWERED")
+    val steps = runBlocking { flowStepRepository.stepsByFlow(result.flowId) }
+    assertThat(steps.map { it.type }).contains(FlowStepType.HUMAN_ASK, FlowStepType.HUMAN_ANSWER)
+  }
+
+  @Test
+  fun `ask_human tool suspends flow and answer resumes the cycle`() {
+    // 1) модель просит ask_human; 2) после ответа — финальный APPROVED
+    fake.enqueue(
+      FakeChatClient.toolCall(
+        name = "ask_human",
+        argumentsJson = """{"question":"Уточните дату митапа","options":["2 октября","9 октября"]}""",
+      ),
+    )
+    fake.enqueue(FakeChatClient.text(approvedJson()))
+
+    val embedder = ScriptedEmbedder(default = unit(7))
+    val svc = AgentFlowService(
+      llmClient = fake,
+      tools = listOf(SearchDuplicateTool(embedder, eventRepository), AskHumanTool()),
+      systemPromptBuilder = SystemPromptBuilder(FileContextProvider()),
+      flowRepository = flowRepository,
+      flowStepRepository = flowStepRepository,
+      eventRepository = eventRepository,
+      embeddingClient = embedder,
+      guardrailsService = passGuardrails,
+      metrics = metrics,
+      humanRequestRepository = humanRequestRepository,
+      proxyNotifier = noopNotifier,
+    )
+
+    val notifications = mutableListOf<org.jep21s.meetupflowagent.notify.ProxyNotification>()
+    coEvery { noopNotifier.notify(any()) } answers {
+      notifications += firstArg<org.jep21s.meetupflowagent.notify.ProxyNotification>()
+    }
+    val suspended = runBlocking { svc.run("митап без даты") }
+
+    assertThat(suspended.status).isEqualTo(FlowStatus.WAITING_HUMAN)
+    assertThat(suspended.reasons).contains("HUMAN_INPUT_REQUIRED")
+    // уведомление прокси: текст вопроса + options
+    val hitl = notifications.first { it.event == "HUMAN_INPUT_REQUIRED" }
+    assertThat(hitl.text).contains("дату")
+    assertThat(hitl.options).hasSize(2)
+    // вопрос в human_requests (PENDING) и шаг HUMAN_ASK записан
+    val flow = runBlocking { flowRepository.findById(suspended.flowId) }
+    assertThat(flow!!.status).isEqualTo("WAITING_HUMAN")
+    val steps = runBlocking { flowStepRepository.stepsByFlow(suspended.flowId) }
+    assertThat(steps.map { it.type }).contains(FlowStepType.HUMAN_ASK)
+    // снапшот хранит прерванный tool_call для резюма
+    val snap = flow.stateSnapshot
+    assertThat(snap).isNotNull
+    assertThat(snap!!.path("pendingToolCall").path("name").asText()).isEqualTo("ask_human")
+
+    // первый ответ побеждает и резюмит цикл → финал APPROVED
+    val first = runBlocking { humanRequestRepository.submitAnswer(suspended.flowId, 1L, "2 октября") }
+    assertThat(first).isTrue()
+    val resumed = runBlocking { svc.resume(suspended.flowId, "2 октября") }
+    assertThat(resumed.status).isEqualTo(FlowStatus.COMPLETED)
+    assertThat(resumed.verdictStatus.name).isEqualTo("APPROVED")
+    assertThat(resumed.eventId).isNotNull()
+    // опоздавший ответ не побеждает
+    val second = runBlocking { humanRequestRepository.submitAnswer(suspended.flowId, 2L, "9 октября") }
+    assertThat(second).isFalse()
   }
 
   @Test
