@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.TextColumnType
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -75,6 +76,25 @@ class FlowStepRepository(private val db: DatabaseConnectivity) {
       nextSeq
     }
   }
+  /** Флаг «REMINDER уже отправлен» — STATUS-шаг с kind=REMINDER_SENT. */
+  suspend fun hasStatusFlag(flowId: UUID, kind: String): Boolean = withContext(Dispatchers.IO) {
+    suspendTransaction(db.database) {
+      exec(
+        """SELECT count(*) FROM flow_steps
+           WHERE flow_id = ?::uuid AND type = 'STATUS' AND content->>'kind' = ?""",
+        args = listOf(TextColumnType() to flowId.toString(), TextColumnType() to kind),
+      ) { rs -> if (rs.next()) rs.getLong(1) else 0L }.let { (it ?: 0L) > 0 }
+    }
+  }
+
+  suspend fun appendStatusFlag(flowId: UUID, kind: String, details: String? = null) {
+    val content = org.jep21s.meetupflowagent.starter.jackson.jacksonMapper.createObjectNode().apply {
+      put("kind", kind)
+      details?.let { put("details", it.take(500)) }
+    }
+    appendStep(flowId = flowId, type = FlowStepType.STATUS, content = content)
+  }
+
   suspend fun stepsByFlow(flowId: UUID): List<FlowStepRow> = withContext(Dispatchers.IO) {
     suspendTransaction(db.database) {
       FlowSteps.selectAll()

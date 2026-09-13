@@ -1,7 +1,6 @@
 package org.jep21s.meetupflowagent.flow
 
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 
@@ -39,14 +38,18 @@ class FlowTransitionTest {
   }
 
   @Test
-  fun `waiting statuses have no transitions yet (project stage)`() {
-    val waiting = listOf(
-      FlowStatus.WAITING_HUMAN, FlowStatus.WAITING_TOOL_APPROVAL,
-      FlowStatus.WAITING_RETRY, FlowStatus.EXPIRED, FlowStatus.FAILED_PERMANENT,
+  fun `project-stage resilience transitions are allowed`() {
+    val resilience = listOf(
+      FlowStatus.PROCESSING to FlowStatus.WAITING_RETRY,
+      FlowStatus.WAITING_RETRY to FlowStatus.PROCESSING,
+      FlowStatus.WAITING_RETRY to FlowStatus.FAILED_PERMANENT,
+      FlowStatus.PROCESSING to FlowStatus.WAITING_HUMAN,
+      FlowStatus.WAITING_HUMAN to FlowStatus.COMPLETED,
+      FlowStatus.WAITING_HUMAN to FlowStatus.EXPIRED,
     )
-    waiting.forEach { status ->
-      assertThatThrownBy { FlowTransitions.checkTransition(FlowStatus.PROCESSING, status) }
-        .isInstanceOf(IllegalFlowTransitionException::class.java)
+    resilience.forEach { (from, to) ->
+      FlowTransitions.checkTransition(from, to)
+      assertThat(FlowTransitions.isAllowed(from, to)).isTrue()
     }
   }
 }

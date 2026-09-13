@@ -18,6 +18,7 @@ import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.jep21s.meetupflowagent.config.restModule
 import org.jep21s.meetupflowagent.db.FlowRepository
+import org.jep21s.meetupflowagent.db.InboxRepository
 import org.jep21s.meetupflowagent.db.FlowStepRepository
 import org.jep21s.meetupflowagent.db.FlowStepRow
 import org.jep21s.meetupflowagent.db.FlowStepType
@@ -37,9 +38,10 @@ import java.util.UUID
 
 class FlowRouteTest {
 
-  private val flowService: AgentFlowService = mockk()
-  private val flowRepository: FlowRepository = mockk()
-  private val flowStepRepository: FlowStepRepository = mockk()
+  private val flowService: AgentFlowService = mockk(relaxed = true)
+  private val flowRepository: FlowRepository = mockk(relaxed = true)
+  private val flowStepRepository: FlowStepRepository = mockk(relaxed = true)
+  private val inboxRepository: InboxRepository = mockk(relaxed = true)
 
   @BeforeEach
   fun startKoinWithMocks() {
@@ -49,6 +51,7 @@ class FlowRouteTest {
           single { flowService }
           single { flowRepository }
           single { flowStepRepository }
+          single { inboxRepository }
         },
       )
     }
@@ -60,35 +63,42 @@ class FlowRouteTest {
   }
 
   @Test
-  fun `post messages returns flow result`() = testApplication {
+  fun `post messages returns 202 with flowId`() = testApplication {
     val flowId = UUID.randomUUID()
-    val eventId = UUID.randomUUID()
-    coEvery { flowService.run(any(), any()) } coAnswers {
-      FlowResult(
-        flowId = flowId,
-        status = FlowStatus.COMPLETED,
-        verdictStatus = VerdictStatus.APPROVED,
-        reasons = emptyList(),
-        eventId = eventId,
-        reply = """{"title":"PiterJS #61"}""",
-        iterations = 2,
-      )
-    }
+    val inboxId = UUID.randomUUID()
+    coEvery { inboxRepository.insertIfAbsent(any(), any(), any()) } returns
+      InboxRepository.InsertResult.Inserted(inboxId)
+    coEvery { flowRepository.create("PROCESSING", null, inboxId) } returns flowId
+    coEvery { inboxRepository.attachFlow(inboxId, flowId) } returns Unit
 
     application { restModule() }
     val response = client.post("/api/messages") {
       header(HttpHeaders.Authorization, "change-me-token")
       contentType(ContentType.Application.Json)
-      setBody("""{"text":"митап PiterJS 2 октября"}""")
+      setBody("""{"idempotencyKey":"msg-1","text":"митап PiterJS 2 октября"}""")
     }
 
-    assertThat(response.status.value).isEqualTo(200)
+    assertThat(response.status.value).isEqualTo(202)
     val body = jacksonMapper.readTree(response.bodyAsText())
     assertThat(body.path("flowId").asText()).isEqualTo(flowId.toString())
-    assertThat(body.path("status").asText()).isEqualTo("COMPLETED")
-    assertThat(body.path("verdict").path("status").asText()).isEqualTo("APPROVED")
-    assertThat(body.path("eventId").asText()).isEqualTo(eventId.toString())
-    assertThat(body.path("iterations").asInt()).isEqualTo(2)
+  }
+
+  @Test
+  fun `duplicate idempotency key returns 409 with existing flowId`() = testApplication {
+    val existingFlowId = UUID.randomUUID()
+    coEvery { inboxRepository.insertIfAbsent("msg-1", any(), any()) } returns
+      InboxRepository.InsertResult.Duplicate(UUID.randomUUID(), existingFlowId)
+
+    application { restModule() }
+    val response = client.post("/api/messages") {
+      header(HttpHeaders.Authorization, "change-me-token")
+      contentType(ContentType.Application.Json)
+      setBody("""{"idempotencyKey":"msg-1","text":"повторное сообщение"}""")
+    }
+
+    assertThat(response.status.value).isEqualTo(409)
+    val body = jacksonMapper.readTree(response.bodyAsText())
+    assertThat(body.path("flowId").asText()).isEqualTo(existingFlowId.toString())
   }
 
   @Test
@@ -99,51 +109,6 @@ class FlowRouteTest {
       setBody("""{"text":"митап"}""")
     }
     assertThat(response.status.value).isEqualTo(401)
-  }
-
-  @Test
-  fun `post messages streams flow events and final carries flow result`() = testApplication {
-    coEvery { flowService.run(any(), any()) } coAnswers {
-      val emit = secondArg<suspend (org.jep21s.meetupflowagent.agent.AgentStreamEvent) -> Unit>()
-      emit(org.jep21s.meetupflowagent.agent.AgentStreamEvent.ReasoningDelta("думаю"))
-      emit(org.jep21s.meetupflowagent.agent.AgentStreamEvent.ToolCall("search_duplicate", "{}"))
-      emit(org.jep21s.meetupflowagent.agent.AgentStreamEvent.ToolResult(true, "не найдено", null))
-      emit(org.jep21s.meetupflowagent.agent.AgentStreamEvent.ContentDelta("{\"title\""))
-      emit(
-        org.jep21s.meetupflowagent.agent.AgentStreamEvent.Final(
-          FlowResult(
-            flowId = UUID.randomUUID(),
-            status = FlowStatus.COMPLETED,
-            verdictStatus = VerdictStatus.APPROVED,
-            reasons = emptyList(),
-          ),
-        ),
-      )
-      FlowResult(
-        flowId = UUID.randomUUID(),
-        status = FlowStatus.COMPLETED,
-        verdictStatus = VerdictStatus.APPROVED,
-        reasons = emptyList(),
-      )
-    }
-
-    application { restModule() }
-    val response = client.post("/api/messages") {
-      header(HttpHeaders.Authorization, "change-me-token")
-      accept(ContentType.Text.EventStream)
-      contentType(ContentType.Application.Json)
-      setBody("""{"text":"митап"}""")
-    }
-
-    assertThat(response.status.value).isEqualTo(200)
-    assertThat(response.contentType().toString()).contains("text/event-stream")
-    val events = parseSse(response.bodyAsText())
-    assertThat(events.map { it.first }).containsExactly(
-      "reasoning_delta", "tool_call", "tool_result", "content_delta", "final",
-    )
-    val final = jacksonMapper.readTree(events.last().second)
-    assertThat(final.path("status").asText()).isEqualTo("COMPLETED")
-    assertThat(final.path("verdict").path("status").asText()).isEqualTo("APPROVED")
   }
 
   @Test

@@ -5,7 +5,13 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.IntegerColumnType
+import org.jetbrains.exposed.v1.core.TextColumnType
+import org.jetbrains.exposed.v1.javatime.JavaInstantColumnType
+import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.suspendTransaction
@@ -19,7 +25,7 @@ import kotlin.uuid.toKotlinUuid
 
 private val logger = KotlinLogging.logger { }
 
-/** Строка `flows` (упрощённо; полная стейт-машина — этап 5). */
+/** Строка `flows`. */
 data class FlowRow(
   val id: UUID,
   val status: String,
@@ -28,6 +34,8 @@ data class FlowRow(
   val lastError: String?,
   val createdAt: Instant?,
   val updatedAt: Instant?,
+  val retryCount: Int = 0,
+  val inboxMessageId: UUID? = null,
 )
 
 /** Запись о дубле: связь нового флоу с уже существующим событием. */
@@ -48,7 +56,7 @@ data class DuplicateRow(
 @Singleton
 class FlowRepository(private val db: DatabaseConnectivity) {
 
-  suspend fun create(status: String, verdict: JsonNode? = null): UUID {
+  suspend fun create(status: String, verdict: JsonNode? = null, inboxMessageId: UUID? = null): UUID {
     val id = UUID.randomUUID()
     withContext(Dispatchers.IO) {
       suspendTransaction(db.database) {
@@ -56,11 +64,84 @@ class FlowRepository(private val db: DatabaseConnectivity) {
           it[Flows.id] = id.toKotlinUuid()
           it[Flows.status] = status
           it[Flows.verdict] = verdict
+          it[Flows.inboxMessageId] = inboxMessageId?.toKotlinUuid()
         }
       }
     }
-    logger.info { "flow created: id=$id status=$status" }
+    logger.info { "flow created: id=$id status=$status inbox=$inboxMessageId" }
     return id
+  }
+
+  /**
+   * RetryPoller: атомарно забрать просроченные WAITING_RETRY (SKIP LOCKED) и
+   * перевести в PROCESSING для резюма; возвращает id флоу.
+   */
+  suspend fun claimRetriableReady(now: Instant, limit: Int): List<UUID> = withContext(Dispatchers.IO) {
+    suspendTransaction(db.database) {
+      exec(
+        """UPDATE flows SET status = 'PROCESSING', updated_at = now()
+           WHERE id IN (SELECT id FROM flows WHERE status = 'WAITING_RETRY' AND next_retry_at <= ? LIMIT ? FOR UPDATE SKIP LOCKED)
+           RETURNING id""",
+        args = listOf(JavaInstantColumnType() to now, IntegerColumnType() to limit),
+      ) { rs ->
+        val ids = mutableListOf<UUID>()
+        while (rs.next()) ids += UUID.fromString(rs.getString("id"))
+        ids
+      }.orEmpty()
+    }
+  }
+
+  /** Перевод флоу в WAITING_RETRY со шкалой попыток (§13). */
+  suspend fun markWaitingRetry(flowId: UUID, lastError: String?, retryCount: Int, nextRetryAt: Instant) {
+    withContext(Dispatchers.IO) {
+      suspendTransaction(db.database) {
+        Flows.update({ Flows.id eq flowId.toKotlinUuid() }) {
+          it[status] = "WAITING_RETRY"
+          it[Flows.retryCount] = retryCount
+          it[Flows.nextRetryAt] = nextRetryAt
+          it[Flows.lastError] = lastError?.take(1000)
+          it[updatedAt] = Instant.now()
+        }
+      }
+    }
+    logger.warn { "flow waiting retry: id=$flowId attempt=$retryCount nextRetryAt=$nextRetryAt error=${lastError?.take(120)}" }
+  }
+
+  suspend fun markFailedPermanent(flowId: UUID, lastError: String?) {
+    withContext(Dispatchers.IO) {
+      suspendTransaction(db.database) {
+        Flows.update({ Flows.id eq flowId.toKotlinUuid() }) {
+          it[status] = "FAILED_PERMANENT"
+          it[Flows.lastError] = lastError?.take(1000)
+          it[updatedAt] = Instant.now()
+        }
+      }
+    }
+    logger.error { "flow failed permanently: id=$flowId error=${lastError?.take(200)}" }
+  }
+
+  /** Crash-recovery: PROCESSING-флоу без обновлений дольше порога (падение JVM). */
+  suspend fun findStuckProcessing(olderThan: Instant, limit: Int = 50): List<UUID> = withContext(Dispatchers.IO) {
+    suspendTransaction(db.database) {
+      Flows.selectAll().where { (Flows.status eq "PROCESSING") and (Flows.updatedAt less olderThan) }
+        .limit(limit)
+        .map { it[Flows.id].toJavaUuid() }
+    }
+  }
+
+  /** WAITING_HUMAN: asked_at раньше порога (для reminder/expire). */
+  suspend fun findWaitingHumanOlderThan(olderThan: Instant, limit: Int = 50): List<UUID> = withContext(Dispatchers.IO) {
+    suspendTransaction(db.database) {
+      exec(
+        """SELECT f.id FROM flows f JOIN human_requests h ON h.flow_id = f.id
+           WHERE f.status = 'WAITING_HUMAN' AND h.status = 'PENDING' AND h.asked_at <= ? LIMIT ?""",
+        args = listOf(JavaInstantColumnType() to olderThan, IntegerColumnType() to limit),
+      ) { rs ->
+        val ids = mutableListOf<UUID>()
+        while (rs.next()) ids += UUID.fromString(rs.getString(1))
+        ids
+      }.orEmpty()
+    }
   }
 
   suspend fun updateStatus(
@@ -116,6 +197,30 @@ class FlowRepository(private val db: DatabaseConnectivity) {
     }
   }
 
+  suspend fun findInboxMessageId(flowId: UUID): UUID? = withContext(Dispatchers.IO) {
+    suspendTransaction(db.database) {
+      Flows.selectAll().where { Flows.id eq flowId.toKotlinUuid() }
+        .firstOrNull()?.get(Flows.inboxMessageId)?.toJavaUuid()
+    }
+  }
+
+  /** WAITING_HUMAN → EXPIRED: флоу + все PENDING-вопросы. */
+  suspend fun expireHumanRequest(flowId: UUID) {
+    withContext(Dispatchers.IO) {
+      suspendTransaction(db.database) {
+        Flows.update({ Flows.id eq flowId.toKotlinUuid() }) {
+          it[status] = "EXPIRED"
+          it[updatedAt] = Instant.now()
+        }
+        exec(
+          "UPDATE human_requests SET status = 'EXPIRED' WHERE flow_id = ?::uuid AND status = 'PENDING'",
+          args = listOf(TextColumnType() to flowId.toString()),
+        )
+      }
+    }
+    logger.info { "human request expired: flowId=$flowId" }
+  }
+
   private fun ResultRow.toFlowRow() = FlowRow(
     id = this[Flows.id].toJavaUuid(),
     status = this[Flows.status],
@@ -124,6 +229,8 @@ class FlowRepository(private val db: DatabaseConnectivity) {
     lastError = this[Flows.lastError],
     createdAt = this[Flows.createdAt],
     updatedAt = this[Flows.updatedAt],
+    retryCount = this[Flows.retryCount],
+    inboxMessageId = this[Flows.inboxMessageId]?.toJavaUuid(),
   )
 
   private fun ResultRow.toDuplicateRow() = DuplicateRow(

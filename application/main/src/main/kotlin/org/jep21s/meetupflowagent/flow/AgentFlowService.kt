@@ -30,6 +30,8 @@ import org.jep21s.meetupflowagent.domain.VerdictStatus
 import org.jep21s.meetupflowagent.llm.EmbeddingClient
 import org.jep21s.meetupflowagent.llm.EmbeddingException
 import org.jep21s.meetupflowagent.llm.LlmClient
+import org.jep21s.meetupflowagent.llm.LlmException
+import org.jep21s.meetupflowagent.scheduler.RetrySchedule
 import org.jep21s.meetupflowagent.llm.StreamDelta
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionRequest
 import org.jep21s.meetupflowagent.llm.dto.ChatMessage
@@ -88,6 +90,58 @@ class AgentFlowService(
         description = t.description,
         parameters = t.parametersSchema,
       ),
+    )
+  }
+
+  /**
+   * Исполнение флоу, созданного inbox-поллером (§12): guardrails + цикл как в
+   * [run]; RETRYABLE-падение любого шага (после исчерпания in-request retry) →
+   * WAITING_RETRY со шкалой retry.schedule (§13), сообщение остаётся необработанным
+   * до RetryPoller. Повтор выполняется с начала флоу (дубль-чек идемпотентен;
+   * история попыток накапливается в flow_steps).
+   */
+  suspend fun executeInboxFlow(flowId: UUID, inboxId: UUID, rawText: String): FlowResult {
+    val model = ConfigLoader.getRequiredProperty(
+      "llm.agent.model",
+      "llm.agent.model is not configured",
+    )
+    val startedAt = System.nanoTime()
+    return try {
+      val result = MDC.putCloseable("flowId", flowId.toString()).use {
+        withContext(MDCContext()) {
+          runLoop(flowId, rawText, model, emit = null)
+        }
+      }
+      metrics.flowStatus(result.status.name)
+      metrics.flowDuration(Duration.ofNanos(System.nanoTime() - startedAt))
+      result
+    } catch (e: kotlinx.coroutines.CancellationException) {
+      throw e
+    } catch (e: LlmException) {
+      if (e.category != LlmException.Category.RETRYABLE) throw e
+      markWaitingRetry(flowId, e)
+      FlowResult(flowId, FlowStatus.WAITING_RETRY, VerdictStatus.NEEDS_REVIEW, listOf("RETRY_SCHEDULED"))
+    } catch (e: Exception) {
+      // БД/сеть/прочие транзиентные сбои шага — тоже на retry-шкалу (§13)
+      markWaitingRetry(flowId, e)
+      FlowResult(flowId, FlowStatus.WAITING_RETRY, VerdictStatus.NEEDS_REVIEW, listOf("RETRY_SCHEDULED"))
+    }
+  }
+
+  private suspend fun markWaitingRetry(flowId: UUID, error: Exception) {
+    val schedule = RetrySchedule.parse(ConfigLoader.getProperty("retry.schedule", "1m,5m,15m,1h,6h"))
+    val existing = flowRepository.findById(flowId)
+    val attempt = (existing?.retryCount ?: 0) + 1
+    val maxAttempts = ConfigLoader.getProperty("retry.maxAttempts", "6").toInt()
+    if (attempt > maxAttempts) {
+      flowRepository.markFailedPermanent(flowId, error.message)
+      return
+    }
+    flowRepository.markWaitingRetry(
+      flowId,
+      error.message,
+      attempt,
+      Instant.now().plus(RetrySchedule.nextDelay(schedule, attempt - 1)),
     )
   }
 
