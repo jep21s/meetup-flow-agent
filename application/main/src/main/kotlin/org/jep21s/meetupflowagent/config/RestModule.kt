@@ -15,6 +15,8 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import org.jep21s.meetupflowagent.route.flowStream
+import org.jep21s.meetupflowagent.route.events
 import org.jep21s.meetupflowagent.route.flows
 import org.jep21s.meetupflowagent.route.internalMetrics
 import org.jep21s.meetupflowagent.route.messages
@@ -64,6 +66,8 @@ fun Application.restModule() {
       ping()
       messages()
       flows()
+      flowStream()
+      events()
     }
   }
 }

@@ -83,6 +83,7 @@ class AgentFlowService(
   private val metrics: Metrics,
   private val humanRequestRepository: org.jep21s.meetupflowagent.db.HumanRequestRepository,
   private val proxyNotifier: org.jep21s.meetupflowagent.notify.ProxyNotifier,
+  private val flowEventBus: FlowEventBus = FlowEventBus(),
 ) {
 
   private val systemPrompt: String by lazy { systemPromptBuilder.build() }
@@ -271,6 +272,7 @@ class AgentFlowService(
         snapshot = snapshotJson(state, iteration, toolCallsLog.size),
       )
       MDC.put("stepSeq", reasonSeq.toString())
+      flowEventBus.publish(FlowEvent(flowId, "step", reasonSeq, mapOf("type" to "REASON")))
       logStep(
         "llm_call",
         if (assistantMessage.toolCalls.orEmpty().isEmpty()) "финальный ответ модели" else "выбор инструмента",
@@ -292,6 +294,7 @@ class AgentFlowService(
           snapshot = snapshotJson(state, iteration, toolCallsLog.size),
         )
         logStep("final", "итоговый JSON агента", "completed", null, response.usage?.completionTokens?.toLong(), model, finalSeq)
+        flowEventBus.publish(FlowEvent(flowId, "step", finalSeq, mapOf("type" to "FINAL")))
         metrics.reactCycles(iteration)
         val result = finalize(flowId, finalText, toolCallsLog, iteration)
         emit?.invoke(AgentStreamEvent.Final(result))

@@ -7,8 +7,13 @@ import org.jetbrains.exposed.v1.core.IColumnType
 import org.jetbrains.exposed.v1.core.IntegerColumnType
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.TextColumnType
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.javatime.JavaInstantColumnType
+import org.jetbrains.exposed.v1.jdbc.Query
+import org.jetbrains.exposed.v1.jdbc.andWhere
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.suspendTransaction
@@ -90,6 +95,19 @@ class EventRepository(private val db: DatabaseConnectivity) {
     }
     return event.id
   }
+
+  /** Календарь §11: окно по starts_at (по умолчанию 30 дней вперёд от now). */
+  suspend fun findInRange(from: Instant?, to: Instant?, limit: Int = 100): List<EventRow> =
+    withContext(Dispatchers.IO) {
+      suspendTransaction(db.database) {
+        var query = Events.selectAll()
+        if (from != null) query = query.andWhere { Events.startsAt greaterEq from }
+        if (to != null) query = query.andWhere { Events.startsAt lessEq to }
+        query.orderBy(Events.startsAt to org.jetbrains.exposed.v1.core.SortOrder.ASC)
+          .limit(limit)
+          .map { it.toEventRow() }
+      }
+    }
 
   suspend fun findById(id: UUID): EventRow? = withContext(Dispatchers.IO) {
     suspendTransaction(db.database) {
