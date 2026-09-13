@@ -36,14 +36,41 @@ class EventPersisterTest {
   fun `rejected verdict creates flow in REJECTED and skips event`() {
     val flowId = UUID.randomUUID()
     coEvery { flowRepository.create("PROCESSING", any()) } returns flowId
+    coEvery { eventRepository.searchSimilar(any(), any(), any(), any(), any()) } returns emptyList()
 
     val outcome = runBlocking {
-      persister().persist("""{"title":"X","verdict":{"status":"REJECTED","reasons":["PAID"]}}""")
+      persister().persist(
+        """{"title":"X","startsAt":"2026-10-02T18:30:00+03:00",
+            "verdict":{"status":"REJECTED","reasons":["PAID"]}}""",
+      )
     }
 
     assertThat(outcome).isInstanceOf(PersistOutcome.Skipped::class.java)
     assertThat((outcome as PersistOutcome.Skipped).reason).contains("REJECTED")
     coVerify { flowRepository.updateStatus(flowId, "REJECTED", null) }
+    coVerify(exactly = 0) { eventRepository.insert(any()) }
+  }
+
+  @Test
+  fun `duplicate above threshold is recorded even with NEEDS_REVIEW verdict`() {
+    val flowId = UUID.randomUUID()
+    val existingId = UUID.randomUUID()
+    coEvery { flowRepository.create("PROCESSING", any()) } returns flowId
+    coEvery { eventRepository.searchSimilar(any(), any(), any(), any(), any()) } returns listOf(
+      DuplicateCandidate(existingId, "PiterJS #61 (повтор)", null, null, 0.97),
+    )
+
+    val outcome = runBlocking {
+      persister().persist(
+        """{"title":"PiterJS #61","startsAt":"2026-10-02T18:30:00+03:00",
+            "verdict":{"status":"NEEDS_REVIEW","reasons":["POSSIBLE_DUPLICATE"]}}""",
+      )
+    }
+
+    // повторный анонс с NEEDS_REVIEW от тул-чека: связь duplicates пишется и без APPROVED
+    assertThat(outcome).isInstanceOf(PersistOutcome.Duplicate::class.java)
+    coVerify { flowRepository.insertDuplicate(flowId, existingId, 0.97, "AGENT") }
+    coVerify { flowRepository.updateStatus(flowId, "DUPLICATE", null) }
     coVerify(exactly = 0) { eventRepository.insert(any()) }
   }
 

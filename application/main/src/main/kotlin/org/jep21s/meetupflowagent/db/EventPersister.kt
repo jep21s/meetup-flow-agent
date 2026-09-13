@@ -53,12 +53,8 @@ class DbEventPersister(
 
     val verdict = root.path("verdict").takeIf { it.isObject }
     val verdictStatus = root.path("verdict").path("status").asText("").trim().uppercase()
+    val approved = verdictStatus == "APPROVED"
     val flowId = flowRepository.create(status = "PROCESSING", verdict = verdict)
-
-    if (verdictStatus != "APPROVED") {
-      flowRepository.updateStatus(flowId, "REJECTED")
-      return PersistOutcome.Skipped("verdict=${verdictStatus.ifEmpty { "отсутствует" }} — событие не создаётся")
-    }
 
     val title = root.path("title").asText("").trim()
     val startsAt = parseInstant(root.path("startsAt").asText("").trim())
@@ -67,28 +63,37 @@ class DbEventPersister(
       return PersistOutcome.Skipped("нет обязательных полей (title, startsAt) — событие не восстановимо")
     }
 
-    val organizer = root.textOrNull("organizer")
-    val embeddingText = embeddingText(title, organizer, startsAt, root.textOrNull("venueName"))
     val embedding = try {
-      embeddingClient.embed(embeddingText)
+      embeddingClient.embed(embeddingText(title, root.textOrNull("organizer"), startsAt, root.textOrNull("venueName")))
     } catch (e: EmbeddingException) {
-      flowRepository.updateStatus(flowId, "WAITING_RETRY", lastError = "embedding unavailable: ${e.category}")
-      return PersistOutcome.Skipped("эмбеддинг недоступен (${e.category}) — повтор будет позже")
+      // событие не создаётся и так → REJECTED; для APPROVED — на повтор (retry-механика — этап 6)
+      flowRepository.updateStatus(
+        flowId,
+        if (approved) "WAITING_RETRY" else "REJECTED",
+        lastError = "embedding unavailable: ${e.category}",
+      )
+      return PersistOutcome.Skipped("эмбеддинг недоступен (${e.category})${if (approved) " — повтор будет позже" else ""}")
     }
 
+    // Финальная проверка дубля перед записью (§8.5) — независимо от вердикта агента:
+    // повторный анонс мог прийти с NEEDS_REVIEW от тул-чека; связь пишем и в этом случае.
     val windowDays = ConfigLoader.getProperty("dedup.dateWindowDays", "3").toLong()
-    val candidates = eventRepository.searchSimilar(
+    val top = eventRepository.searchSimilar(
       embedding = embedding,
       dateFrom = startsAt.minusSeconds(windowDays * 24 * 3600),
       dateTo = startsAt.plusSeconds(windowDays * 24 * 3600),
-    )
-    val top = candidates.firstOrNull()
+    ).firstOrNull()
     val thresholdHigh = ConfigLoader.getProperty("dedup.thresholdHigh", "0.92").toDouble()
     if (top != null && top.similarity >= thresholdHigh) {
       flowRepository.insertDuplicate(flowId, top.eventId, top.similarity, decidedBy = "AGENT")
       flowRepository.updateStatus(flowId, "DUPLICATE")
       logger.info { "duplicate detected: flowId=$flowId existingEventId=${top.eventId} similarity=${top.similarity}" }
       return PersistOutcome.Duplicate(top.eventId, top.title, top.similarity)
+    }
+
+    if (!approved) {
+      flowRepository.updateStatus(flowId, "REJECTED")
+      return PersistOutcome.Skipped("verdict=${verdictStatus.ifEmpty { "отсутствует" }} — событие не создаётся")
     }
 
     val eventId = eventRepository.insert(toEventRow(root, title, startsAt, flowId, embedding))
