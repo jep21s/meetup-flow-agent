@@ -238,7 +238,8 @@ class AgentFlowService(
     }
 
     // Финальный дубль-чек перед записью (§8.5); ошибка эмбеддинга не блокирует флоу (resilience — этап 6)
-    val top = findTopDuplicate(parsed.dto, validated.startsAtInstant)
+    val dedup = runDedupCheck(parsed.dto, validated.startsAtInstant)
+    val top = dedup?.top
     if (top != null && top.similarity >= thresholdHigh()) {
       FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.DUPLICATE)
       flowRepository.insertDuplicate(flowId, top.eventId, top.similarity, decidedBy = "AGENT")
@@ -259,7 +260,7 @@ class AgentFlowService(
 
     if (validated.verdict.status == VerdictStatus.APPROVED && validated.startsAtInstant != null) {
       val eventId = eventRepository.insert(
-        toEventRow(parsed.dto, parsed.raw, validated, flowId),
+        toEventRow(parsed.dto, parsed.raw, validated, flowId, dedup?.embedding),
       )
       FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.COMPLETED)
       flowRepository.updateStatus(flowId, FlowStatus.COMPLETED.name, verdict = verdictJson(validated.verdict))
@@ -273,7 +274,13 @@ class AgentFlowService(
     return FlowResult(flowId, FlowStatus.COMPLETED, VerdictStatus.NEEDS_REVIEW, validated.verdict.reasons, similarity = top?.similarity, reply = finalText, toolCalls = toolCallsLog, iterations = iterations)
   }
 
-  private suspend fun findTopDuplicate(dto: EventContractDto, startsAt: Instant?): DuplicateCandidate? {
+  /** Результат финального дубль-чека: вектор события (переиспользуется при insert) + топ-кандидат. */
+  private data class DedupCheck(
+    val embedding: FloatArray,
+    val top: DuplicateCandidate?,
+  )
+
+  private suspend fun runDedupCheck(dto: EventContractDto, startsAt: Instant?): DedupCheck? {
     if (startsAt == null || dto.title.isNullOrBlank()) return null
     val embeddingText = listOfNotNull(
       dto.title?.trim(),
@@ -288,11 +295,12 @@ class AgentFlowService(
       return null
     }
     val windowDays = ConfigLoader.getProperty("dedup.dateWindowDays", "3").toLong()
-    return eventRepository.searchSimilar(
+    val top = eventRepository.searchSimilar(
       embedding = embedding,
       dateFrom = startsAt.minusSeconds(windowDays * 24 * 3600),
       dateTo = startsAt.plusSeconds(windowDays * 24 * 3600),
     ).firstOrNull()
+    return DedupCheck(embedding, top)
   }
 
   private fun toEventRow(
@@ -300,6 +308,7 @@ class AgentFlowService(
     raw: JsonNode,
     validated: ValidatedContract,
     flowId: UUID,
+    embedding: FloatArray?,
   ) = EventRow(
     flowId = flowId,
     title = dto.title!!.trim(),
@@ -319,6 +328,7 @@ class AgentFlowService(
     language = dto.language,
     confidence = dto.confidence,
     raw = raw,
+    embedding = embedding,
   )
 
   private suspend fun executeWithPolicy(toolName: String, argsJson: String): Observation =

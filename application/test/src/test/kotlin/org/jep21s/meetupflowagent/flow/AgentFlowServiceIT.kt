@@ -82,6 +82,9 @@ class AgentFlowServiceIT : PostgresTestBase() {
     val event = runBlocking { eventRepository.findById(result.eventId!!) }
     assertThat(event!!.title).isEqualTo("PiterJS #61")
     assertThat(event.flowId).isEqualTo(result.flowId)
+    // событие сохраняется С эмбеддингом (иначе последующие дубль-чеки ничего не найдут)
+    assertThat(event.embedding).isNotNull
+    assertThat(event.embedding!!.size).isEqualTo(768)
 
     // история шагов: REASON(CoT) → ACTION → OBSERVATION → REASON → FINAL
     val steps = runBlocking { flowStepRepository.stepsByFlow(result.flowId) }
