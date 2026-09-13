@@ -23,6 +23,7 @@ private val logger = KotlinLogging.logger { }
 data class FlowRow(
   val id: UUID,
   val status: String,
+  val stateSnapshot: JsonNode?,
   val verdict: JsonNode?,
   val lastError: String?,
   val createdAt: Instant?,
@@ -62,12 +63,18 @@ class FlowRepository(private val db: DatabaseConnectivity) {
     return id
   }
 
-  suspend fun updateStatus(id: UUID, status: String, lastError: String? = null) {
+  suspend fun updateStatus(
+    id: UUID,
+    status: String,
+    lastError: String? = null,
+    verdict: JsonNode? = null,
+  ) {
     withContext(Dispatchers.IO) {
       suspendTransaction(db.database) {
         Flows.update({ Flows.id eq id.toKotlinUuid() }) {
           it[Flows.status] = status
           if (lastError != null) it[Flows.lastError] = lastError
+          if (verdict != null) it[Flows.verdict] = verdict
           it[updatedAt] = Instant.now()
         }
       }
@@ -112,6 +119,7 @@ class FlowRepository(private val db: DatabaseConnectivity) {
   private fun ResultRow.toFlowRow() = FlowRow(
     id = this[Flows.id].toJavaUuid(),
     status = this[Flows.status],
+    stateSnapshot = this[Flows.stateSnapshot],
     verdict = this[Flows.verdict],
     lastError = this[Flows.lastError],
     createdAt = this[Flows.createdAt],
