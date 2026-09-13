@@ -1,37 +1,33 @@
-.gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
+# Внутренние документы проекта — НЕ для репозитория (В36)
+COMMON_PLAN.md
+PLAN_*.md
+homework.md
+project work.md
 
-### IntelliJ IDEA ###
+# Секреты
+.env
+
+# Gradle
+.gradle/
+build/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
 .idea/
-.idea/**
-/.idea/**
-*.iws
 *.iml
 *.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
+*.iws
+.kotlin/
+.vscode/
 
-### Kotlin ###
-.kotlin
-
-### Mac OS ###
+# OS
 .DS_Store
 
-### Logs ###
-logs/
+# Локальные артефакты
 *.log
-
-### Local data ###
+logs/
 data/
 *.db
 *.sqlite
-
-### Runtime files ###
 *.pid
-
-### Environment ###
-/.env
