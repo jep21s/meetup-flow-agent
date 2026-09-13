@@ -39,6 +39,7 @@ dependencies {
   // liquibase-core помечает picocli как optional, но рантайм Liquibase 5 требует его (CommandScope)
   implementation(libs.picocli)
   implementation(libs.postgresql.driver)
+  implementation(libs.micrometer.registry.prometheus)
 }
 
 tasks.register<Jar>("fatJar") {

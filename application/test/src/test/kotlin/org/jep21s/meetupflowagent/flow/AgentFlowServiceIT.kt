@@ -10,8 +10,11 @@ import org.jep21s.meetupflowagent.db.EventRow
 import org.jep21s.meetupflowagent.db.FlowRepository
 import org.jep21s.meetupflowagent.db.FlowStepRepository
 import org.jep21s.meetupflowagent.db.FlowStepType
+import org.jep21s.meetupflowagent.guardrails.GuardrailsService
+import org.jep21s.meetupflowagent.guardrails.GuardrailsVerdict
 import org.jep21s.meetupflowagent.llm.EmbeddingClient
 import org.jep21s.meetupflowagent.llm.LlmClient
+import org.jep21s.meetupflowagent.observability.Metrics
 import org.jep21s.meetupflowagent.starter.jackson.jacksonMapper
 import org.jep21s.meetupflowagent.testsupport.FakeChatClient
 import org.jep21s.meetupflowagent.testsupport.PostgresTestBase
@@ -56,7 +59,15 @@ class AgentFlowServiceIT : PostgresTestBase() {
       flowStepRepository = flowStepRepository,
       eventRepository = eventRepository,
       embeddingClient = embedder,
+      guardrailsService = passGuardrails,
+      metrics = metrics,
     )
+
+  private val passGuardrails: GuardrailsService = io.mockk.mockk {
+    io.mockk.coEvery { check(any()) } returns GuardrailsVerdict(GuardrailsVerdict.Verdict.PASS)
+  }
+
+  private val metrics = Metrics.inMemory()
 
   @Test
   fun `happy path - search tool then APPROVED final to COMPLETED with event and steps`() {
@@ -86,15 +97,17 @@ class AgentFlowServiceIT : PostgresTestBase() {
     assertThat(event.embedding).isNotNull
     assertThat(event.embedding!!.size).isEqualTo(768)
 
-    // история шагов: REASON(CoT) → ACTION → OBSERVATION → REASON → FINAL
+    // история шагов: GUARDRAILS (этап 6) → REASON(CoT) → ACTION → OBSERVATION → REASON → FINAL
     val steps = runBlocking { flowStepRepository.stepsByFlow(result.flowId) }
     assertThat(steps.map { it.type }).containsExactly(
+      FlowStepType.GUARDRAILS,
       FlowStepType.REASON, FlowStepType.ACTION, FlowStepType.OBSERVATION,
       FlowStepType.REASON, FlowStepType.FINAL,
     )
-    assertThat(steps.map { it.seq }).containsExactlyElementsOf((1..5).toList())
+    assertThat(steps.map { it.seq }).containsExactlyElementsOf((1..6).toList())
+    assertThat(steps.first().content.path("verdict").asText()).isEqualTo("PASS")
     // CoT лежит во втором REASON-шаге (финальный ответ с reasoning)
-    val finalReason = steps[3].content
+    val finalReason = steps[4].content
     assertThat(finalReason.path("reasoning").asText()).contains("дубликаты")
 
     // снапшот состояния обновился (заготовка резюма)
@@ -157,13 +170,14 @@ class AgentFlowServiceIT : PostgresTestBase() {
   }
 
   @Test
-  fun `cycle limit produces NEEDS_REVIEW with CYCLE_LIMIT`() {
-    repeat(AgentFlowService.MAX_ITERATIONS) {
+  fun `stalled cycle stops at base limit with CYCLE_LIMIT`() {
+    // одинаковый tool_call каждую итерацию: сигнатура не меняется 2 цикла → прогресса нет
+    repeat(8) {
       fake.enqueue(
         FakeChatClient.toolCall(
           id = "call_$it",
           name = "search_duplicate",
-          argumentsJson = """{"query":"митап $it"}""",
+          argumentsJson = """{"query":"митап"}""",
         ),
       )
     }
@@ -174,9 +188,9 @@ class AgentFlowServiceIT : PostgresTestBase() {
     assertThat(result.verdictStatus.name).isEqualTo("NEEDS_REVIEW")
     assertThat(result.reasons).containsExactly("CYCLE_LIMIT")
     assertThat(result.limitReached).isTrue()
-    assertThat(result.iterations).isEqualTo(AgentFlowService.MAX_ITERATIONS)
+    assertThat(result.iterations).isEqualTo(8)
     val flow = runBlocking { flowRepository.findById(result.flowId) }
-    assertThat(flow!!.lastError).contains("iteration limit")
+    assertThat(flow!!.lastError).contains("no progress")
   }
 
   @Test

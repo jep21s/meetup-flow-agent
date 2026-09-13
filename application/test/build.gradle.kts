@@ -31,6 +31,7 @@ dependencies {
   implementation(libs.exposed.json)
   implementation(libs.hikaricp)
   implementation(libs.postgresql.driver)
+  implementation(libs.micrometer.registry.prometheus)
   implementation(libs.liquibase.core)
   implementation(libs.picocli)
   implementation(libs.junit.kotlin)

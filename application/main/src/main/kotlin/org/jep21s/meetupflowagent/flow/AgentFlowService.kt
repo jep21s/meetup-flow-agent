@@ -14,6 +14,7 @@ import org.jep21s.meetupflowagent.agent.tools.ToolPolicies
 import org.jep21s.meetupflowagent.agent.tools.ToolPolicyMode
 import org.jep21s.meetupflowagent.agent.tools.ToolResult
 import org.jep21s.meetupflowagent.db.DuplicateCandidate
+import org.jep21s.meetupflowagent.guardrails.GuardrailsService
 import org.jep21s.meetupflowagent.db.EventRepository
 import org.jep21s.meetupflowagent.db.EventRow
 import org.jep21s.meetupflowagent.db.FlowRepository
@@ -33,11 +34,13 @@ import org.jep21s.meetupflowagent.llm.StreamDelta
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionRequest
 import org.jep21s.meetupflowagent.llm.dto.ChatMessage
 import org.jep21s.meetupflowagent.llm.dto.FunctionSpec
+import org.jep21s.meetupflowagent.observability.Metrics
 import org.jep21s.meetupflowagent.llm.dto.ToolSpec
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
 import org.jep21s.meetupflowagent.starter.jackson.jacksonMapper
 import org.koin.core.annotation.Singleton
 import org.slf4j.MDC
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
@@ -46,19 +49,22 @@ private val logger = KotlinLogging.logger { }
 
 
 /**
- * FlowEngine этапа 5 — управляемый сценарий (стейт-машина, PLAN_5 §1.2):
+ * FlowEngine — управляемый сценарий (стейт-машина, PLAN_5 §1.2 + PLAN_6):
  *
+ * 0. guardrails (детерминизм → glm-5.3): вердикт ≠ PASS → REJECTED, цикл не
+ *    запускается (токены экономятся);
  * 1. извлечение — цикл Reason→Act→Observe (fetch_web_page / search_duplicate);
  * 2. fetch_web_page при нехватке данных и наличии ссылки (решение модели);
  * 3. search_duplicate при достаточных фактах (решение модели, SOP промпта);
  * 4. финальный JSON модели;
- * 5. пост-валидация [ContractValidator] +
- *    финальный дубль-чек (≥0.92 → DUPLICATE; 0.85–0.92 → NEEDS_REVIEW) +
- *    вердикт → статус.
+ * 5. пост-валидация [ContractValidator] + финальный дубль-чек (≥0.92 →
+ *    DUPLICATE; 0.85–0.92 → NEEDS_REVIEW) + вердикт → статус.
  *
  * Каждый шаг пишется в flow_steps (включая CoT в REASON), снапшот состояния — в
- * flows.state_snapshot. Временный хард-кап [MAX_ITERATIONS] (полный лимит с
- * прогресс-детектором — этап 6). HITL/retry/резюм — этап project.
+ * flows.state_snapshot; на каждый шаг — структурированный лог (action, status,
+ * latency_ms, tokens, model; БЕЗ CoT и тел запросов, §14). Лимит циклов —
+ * [CycleLimiter] + [ProgressDetector] (8 → +4 при прогрессе → 16). Метрики —
+ * [Metrics]. HITL/резюм — этап project.
  */
 @Singleton
 class AgentFlowService(
@@ -69,6 +75,8 @@ class AgentFlowService(
   private val flowStepRepository: FlowStepRepository,
   private val eventRepository: EventRepository,
   private val embeddingClient: EmbeddingClient,
+  private val guardrailsService: GuardrailsService,
+  private val metrics: Metrics,
 ) {
 
   private val systemPrompt: String by lazy { systemPromptBuilder.build() }
@@ -92,12 +100,16 @@ class AgentFlowService(
       "llm.agent.model is not configured",
     )
     val flowId = flowRepository.create(FlowStatus.PROCESSING.name)
+    val startedAt = System.nanoTime()
     // flowId в MDC распространяется на все корутины флоу (MDCContext)
-    return MDC.putCloseable("flowId", flowId.toString()).use {
+    val result = MDC.putCloseable("flowId", flowId.toString()).use {
       withContext(MDCContext()) {
         runLoop(flowId, message, model, emit)
       }
     }
+    metrics.flowStatus(result.status.name)
+    metrics.flowDuration(Duration.ofNanos(System.nanoTime() - startedAt))
+    return result
   }
 
   private suspend fun runLoop(
@@ -106,6 +118,42 @@ class AgentFlowService(
     model: String,
     emit: (suspend (AgentStreamEvent) -> Unit)?,
   ): FlowResult {
+    // Шаг 0: guardrails до агентского цикла (§8.1)
+    val guardrailsVerdict = guardrailsService.check(message)
+    metrics.guardrailsVerdict(guardrailsVerdict.verdict.name)
+    val guardrailsSeq = flowStepRepository.appendStep(
+      flowId = flowId,
+      type = FlowStepType.GUARDRAILS,
+      content = jacksonMapper.createObjectNode().apply {
+        put("verdict", guardrailsVerdict.verdict.name)
+        putArray("reasons").apply { guardrailsVerdict.reasons.forEach { add(it) } }
+      },
+    )
+    logStep("guardrails", "проверка входящего сообщения", guardrailsVerdict.verdict.name, null, null, model, guardrailsSeq)
+    if (!guardrailsVerdict.isPass) {
+      FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.REJECTED)
+      val reasons = guardrailsVerdict.reasons.ifEmpty { listOf(guardrailsVerdict.verdict.name) }
+      flowRepository.updateStatus(
+        flowId,
+        FlowStatus.REJECTED.name,
+        verdict = jacksonMapper.createObjectNode().apply {
+          put("status", "REJECTED")
+          putArray("reasons").apply { reasons.forEach { add(it) } }
+        },
+      )
+      logger.warn { "flow rejected by guardrails: flowId=$flowId verdict=${guardrailsVerdict.verdict} reasons=$reasons" }
+      val result = FlowResult(
+        flowId = flowId,
+        status = FlowStatus.REJECTED,
+        verdictStatus = VerdictStatus.REJECTED,
+        reasons = reasons,
+        reply = "",
+        iterations = 0,
+      )
+      emit?.invoke(AgentStreamEvent.Final(result))
+      return result
+    }
+
     val state = ConversationState(
       listOf(
         ChatMessage.system(systemPrompt),
@@ -113,8 +161,12 @@ class AgentFlowService(
       ),
     )
     val toolCallsLog = mutableListOf<ToolCallRecord>()
+    val progressDetector = ProgressDetector()
+    val cycleLimiter = cycleLimiterFromConfig()
+    var iteration = 0
 
-    for (iteration in 1..MAX_ITERATIONS) {
+    while (true) {
+      iteration++
       val request = ChatCompletionRequest(model = model, messages = state.snapshot(), tools = toolSpecs)
       val startedAt = System.nanoTime()
       val response = if (emit == null) {
@@ -131,7 +183,7 @@ class AgentFlowService(
       val latencyMs = (System.nanoTime() - startedAt) / 1_000_000
       val assistantMessage = response.firstMessage()
 
-      flowStepRepository.appendStep(
+      val reasonSeq = flowStepRepository.appendStep(
         flowId = flowId,
         type = FlowStepType.REASON,
         content = reasonStep(assistantMessage, response.usage?.totalTokens),
@@ -139,17 +191,29 @@ class AgentFlowService(
         latencyMs = latencyMs,
         snapshot = snapshotJson(state, iteration, toolCallsLog.size),
       )
+      MDC.put("stepSeq", reasonSeq.toString())
+      logStep(
+        "llm_call",
+        if (assistantMessage.toolCalls.orEmpty().isEmpty()) "финальный ответ модели" else "выбор инструмента",
+        "ok",
+        latencyMs,
+        response.usage?.totalTokens?.toLong(),
+        model,
+        reasonSeq,
+      )
 
       val calls = assistantMessage.toolCalls.orEmpty()
       if (calls.isEmpty()) {
         val finalText = assistantMessage.content.orEmpty()
-        flowStepRepository.appendStep(
+        val finalSeq = flowStepRepository.appendStep(
           flowId = flowId,
           type = FlowStepType.FINAL,
           content = simpleObject("reply" to finalText.take(4000)),
           tokens = response.usage?.completionTokens,
           snapshot = snapshotJson(state, iteration, toolCallsLog.size),
         )
+        logStep("final", "итоговый JSON агента", "completed", null, response.usage?.completionTokens?.toLong(), model, finalSeq)
+        metrics.reactCycles(iteration)
         val result = finalize(flowId, finalText, toolCallsLog, iteration)
         emit?.invoke(AgentStreamEvent.Final(result))
         return result
@@ -163,14 +227,26 @@ class AgentFlowService(
           type = FlowStepType.ACTION,
           content = actionStep(call.function.name, call.function.arguments),
         )
+        val toolStartedAt = System.nanoTime()
         val observation = executeWithPolicy(call.function.name, call.function.arguments)
+        val toolLatencyMs = (System.nanoTime() - toolStartedAt) / 1_000_000
         toolCallsLog += observation.record
+        metrics.toolCall(call.function.name, if (observation.record.ok) "ok" else "error")
         state.add(ChatMessage.tool(call.id, observation.observationText))
         flowStepRepository.appendStep(
           flowId = flowId,
           type = FlowStepType.OBSERVATION,
           content = observationStep(observation.observationText, observation.record.ok, observation.record.errorCode),
           snapshot = snapshotJson(state, iteration, toolCallsLog.size),
+        )
+        logStep(
+          "tool_call",
+          "исполнение ${call.function.name}",
+          if (observation.record.ok) "completed" else "error:${observation.record.errorCode}",
+          toolLatencyMs,
+          null,
+          model,
+          null,
         )
         emit?.invoke(
           AgentStreamEvent.ToolResult(
@@ -182,30 +258,39 @@ class AgentFlowService(
       }
       // итерация цикла — допустимый самопереход PROCESSING → PROCESSING
       FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.PROCESSING)
-    }
 
-    // Хард-кап итераций без финального ответа модели
-    FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.COMPLETED)
-    val verdict = Verdict(VerdictStatus.NEEDS_REVIEW, listOf("CYCLE_LIMIT"))
-    flowRepository.updateStatus(
-      flowId,
-      FlowStatus.COMPLETED.name,
-      lastError = "iteration limit $MAX_ITERATIONS reached without final answer",
-      verdict = verdictJson(verdict),
-    )
-    logger.warn { "flow hit cycle limit: flowId=$flowId iterations=$MAX_ITERATIONS" }
-    val result = FlowResult(
-      flowId = flowId,
-      status = FlowStatus.COMPLETED,
-      verdictStatus = VerdictStatus.NEEDS_REVIEW,
-      reasons = verdict.reasons,
-      reply = state.lastAssistantContent().orEmpty(),
-      toolCalls = toolCallsLog,
-      iterations = MAX_ITERATIONS,
-      limitReached = true,
-    )
-    emit?.invoke(AgentStreamEvent.Final(result))
-    return result
+      // Лимит циклов с прогресс-детектором (§8.4): сигнатура = факты черновика + история тулов
+      val facts = draftFacts(state.lastAssistantContent())
+      val hasProgress = progressDetector.update(facts, toolCallsLog.map { it.name to it.args })
+      val decision = cycleLimiter.onIterationCompleted(iteration, hasProgress)
+      if (decision.extended) {
+        logger.info { "cycle limit extended: flowId=$flowId iteration=$iteration (${decision.reason})" }
+      }
+      if (decision.stop) {
+        metrics.reactCycles(iteration)
+        FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.COMPLETED)
+        val verdict = Verdict(VerdictStatus.NEEDS_REVIEW, listOf("CYCLE_LIMIT"))
+        flowRepository.updateStatus(
+          flowId,
+          FlowStatus.COMPLETED.name,
+          lastError = decision.reason,
+          verdict = verdictJson(verdict),
+        )
+        logger.warn { "flow stopped by cycle limiter: flowId=$flowId iterations=$iteration (${decision.reason})" }
+        val result = FlowResult(
+          flowId = flowId,
+          status = FlowStatus.COMPLETED,
+          verdictStatus = VerdictStatus.NEEDS_REVIEW,
+          reasons = verdict.reasons,
+          reply = state.lastAssistantContent().orEmpty(),
+          toolCalls = toolCallsLog,
+          iterations = iteration,
+          limitReached = true,
+        )
+        emit?.invoke(AgentStreamEvent.Final(result))
+        return result
+      }
+    }
   }
 
   /** Шаг 5: строгий парсинг → пост-валидация → финальный дубль-чек → статус. */
@@ -373,6 +458,53 @@ class AgentFlowService(
 
   // --- JSON шагов/снапшота ---
 
+  /**
+   * Структурированный лог шага (стиль памятки курса, §14): action, статус,
+   * latency/tokens/model — БЕЗ reasoning_content и тел запросов; flowId/stepSeq
+   * идут через MDC.
+   */
+  private fun logStep(
+    action: String,
+    reasonSummary: String,
+    status: String,
+    latencyMs: Long?,
+    tokens: Long?,
+    model: String,
+    stepSeq: Int?,
+  ) {
+    logger.info {
+      buildString {
+        append("action=").append(action)
+        append(" reason_summary=\"").append(reasonSummary).append("\"")
+        append(" status=").append(status)
+        latencyMs?.let { append(" latency_ms=").append(it) }
+        tokens?.let { append(" tokens=").append(it) }
+        append(" model=").append(model)
+        stepSeq?.let { append(" step=").append(it) }
+      }
+    }
+  }
+
+  /** Извлечённые факты черновика контракта (для прогресс-детектора). */
+  private fun draftFacts(content: String?): Set<String> {
+    if (content.isNullOrBlank()) return emptySet()
+    val parsed = runCatching { ContractParser.parse(content) }.getOrNull() ?: return emptySet()
+    return buildSet {
+      parsed.dto.title?.let { add("title=$it") }
+      parsed.dto.startsAt?.let { add("startsAt=$it") }
+      parsed.dto.city?.let { add("city=$it") }
+      parsed.dto.venueName?.let { add("venueName=$it") }
+      parsed.dto.organizer?.let { add("organizer=$it") }
+      parsed.dto.registrationUrl?.let { add("registrationUrl=$it") }
+    }
+  }
+
+  private fun cycleLimiterFromConfig(): CycleLimiter = CycleLimiter(
+    baseLimit = ConfigLoader.getProperty("react.baseLimit", "8").toInt(),
+    extendBy = ConfigLoader.getProperty("react.extendBy", "4").toInt(),
+    maxLimit = ConfigLoader.getProperty("react.maxLimit", "16").toInt(),
+  )
+
   private fun reasonStep(message: ChatMessage, totalTokens: Int?): ObjectNode =
     jacksonMapper.createObjectNode().apply {
       put("reasoning", message.reasoningContent)
@@ -424,7 +556,4 @@ class AgentFlowService(
     val observationText: String,
   )
 
-  companion object {
-    const val MAX_ITERATIONS = 10
-  }
 }
