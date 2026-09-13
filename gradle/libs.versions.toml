@@ -1,0 +1,79 @@
+# Единый version catalog для всех builds репозитория.
+# Подключается в settings.gradle.kts каждого sub-build через:
+#   dependencyResolutionManagement { versionCatalogs { create("libs") { from(files("../gradle/libs.versions.toml")) } } }
+[versions]
+kotlinVersion = "2.3.20-RC2"
+jvm-language = "21"
+jvm-compiler = "21"
+
+assertj = "3.27.4"
+jackson = "2.18.3"
+junit-parametrized = "5.13.4"
+
+koin = "4.2.0"
+koin-compiler = "0.3.0"
+konvert = "4.4.0"
+
+kotlinx-coroutines = "1.10.2"
+ktor = "3.3.3"
+
+logback = "1.5.32"
+logstash-encoder = "9.0"
+logging-kotlin = "8.0.01"
+
+mockk = "1.14.6"
+
+[libraries]
+assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+jackson-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
+jackson-datatype = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+
+junit-kotlin = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "kotlinVersion" }
+junit-parametrized = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit-parametrized" }
+
+koin-bom = { module = "io.insert-koin:koin-bom", version.ref = "koin" }
+koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+koin-annotations = { module = "io.insert-koin:koin-annotations", version.ref = "koin" }
+koin-logger = { module = "io.insert-koin:koin-logger-slf4j", version.ref = "koin" }
+koin-ktor = { module = "io.insert-koin:koin-ktor", version.ref = "koin" }
+koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
+koin-test-junit5 = { module = "io.insert-koin:koin-test-junit5", version.ref = "koin" }
+koin-gradle-plugin = { module = "io.insert-koin:koin-gradle-plugin", version.ref = "koin" }
+
+konvert-lib = { module = "io.mcarle:konvert", version.ref = "konvert" }
+konvert-api = { module = "io.mcarle:konvert-api", version.ref = "konvert" }
+
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-slf4j = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-slf4j", version.ref = "kotlinx-coroutines" }
+
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+ktor-server-double-receive = { module = "io.ktor:ktor-server-double-receive", version.ref = "ktor" }
+ktor-server-cio = { module = "io.ktor:ktor-server-cio", version.ref = "ktor" }
+ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
+ktor-server-default-headers = { module = "io.ktor:ktor-server-default-headers", version.ref = "ktor" }
+ktor-server-host-common = { module = "io.ktor:ktor-server-host-common", version.ref = "ktor" }
+ktor-server-status-pages = { module = "io.ktor:ktor-server-status-pages", version.ref = "ktor" }
+ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
+ktor-serialization-jackson = { module = "io.ktor:ktor-serialization-jackson", version.ref = "ktor" }
+
+logback = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+logstash-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-encoder" }
+logging-kotlin = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "logging-kotlin" }
+
+mockk = { module = "io.mockk:mockk-jvm", version.ref = "mockk" }
+
+plugin-kotlin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlinVersion" }
+
+test-ktor-server-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
+
+[bundles]
+jackson = ["jackson-kotlin", "jackson-datatype"]
+junit = ["junit-kotlin", "assertj", "junit-parametrized"]
+kotlinx-coroutines = ["kotlinx-coroutines-core", "kotlinx-coroutines-slf4j"]
+ktor-server = ["ktor-server-core", "ktor-server-double-receive", "ktor-server-cio", "ktor-server-content-negotiation", "ktor-server-default-headers", "ktor-server-host-common", "ktor-server-status-pages", "ktor-server-cors", "ktor-serialization-jackson"]
+logging = ["logback", "logstash-encoder", "logging-kotlin"]
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlinVersion" }
+koin-compiler = { id = "io.insert-koin.compiler.plugin", version.ref = "koin-compiler" }
