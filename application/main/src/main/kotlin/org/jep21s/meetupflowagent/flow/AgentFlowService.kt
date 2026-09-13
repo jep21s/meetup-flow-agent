@@ -129,7 +129,15 @@ class AgentFlowService(
         putArray("reasons").apply { guardrailsVerdict.reasons.forEach { add(it) } }
       },
     )
-    logStep("guardrails", "проверка входящего сообщения", guardrailsVerdict.verdict.name, null, null, model, guardrailsSeq)
+    logStep(
+      "guardrails",
+      "проверка входящего сообщения",
+      guardrailsVerdict.verdict.name,
+      null,
+      null,
+      ConfigLoader.getProperty("llm.guardrails.model", "glm-5.3"),
+      guardrailsSeq,
+    )
     if (!guardrailsVerdict.isPass) {
       FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.REJECTED)
       val reasons = guardrailsVerdict.reasons.ifEmpty { listOf(guardrailsVerdict.verdict.name) }

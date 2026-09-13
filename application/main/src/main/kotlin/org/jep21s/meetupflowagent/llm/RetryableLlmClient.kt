@@ -5,7 +5,6 @@ import kotlinx.coroutines.delay
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionRequest
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionResponse
 import org.jep21s.meetupflowagent.observability.Metrics
-import org.koin.core.annotation.Singleton
 import java.time.Duration
 import kotlin.random.Random
 
@@ -16,10 +15,12 @@ private val logger = KotlinLogging.logger { }
  * только RETRYABLE-ошибки (429/5xx/сеть), максимум [maxRetries] дополнительных
  * попыток, пауза `backoffBaseMs * 2^попытка + jitter`. FATAL/PARSE не ретраятся.
  * Здесь же централизованы метрики вызовов: итоговый outcome, латентность, токены
- * и стоимость (прайс §10). Биндится как [LlmClient] — агент и guardrails ходят
- * через retry.
+ * и стоимость (прайс §10).
+ *
+ * В Koin собирается фабрикой в MainBeanConfig поверх конкретного
+ * [KtorOpenAiLlmClient] и биндится как [LlmClient] — агент и guardrails ходят
+ * через retry (делегат объявлен интерфейсом ради тестов).
  */
-@Singleton(binds = [LlmClient::class])
 class RetryableLlmClient(
   private val delegate: LlmClient,
   private val metrics: Metrics,
