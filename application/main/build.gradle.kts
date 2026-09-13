@@ -23,10 +23,6 @@ dependencies {
   implementation(libs.bundles.kotlinx.coroutines)
   implementation(libs.koin.ktor)
   implementation(libs.bundles.ktor.server)
-
-  testImplementation(libs.bundles.junit)
-  testImplementation(libs.mockk)
-  testImplementation(libs.test.ktor.server.host)
 }
 
 tasks.register<Jar>("fatJar") {
@@ -38,11 +34,4 @@ tasks.register<Jar>("fatJar") {
   manifest { attributes["Main-Class"] = mainFile }
 }
 
-tasks.test {
-  jvmArgs = listOf(
-    "--add-opens=java.base/java.time=ALL-UNNAMED",
-    "--add-opens=java.base/java.lang=ALL-UNNAMED",
-    "--add-opens=java.base/java.util=ALL-UNNAMED",
-    "--add-opens=java.base/java.math=ALL-UNNAMED")
-  useJUnitPlatform()
-}
+// main — только прод-код: тесты живут в application/test (В33)

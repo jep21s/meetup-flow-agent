@@ -100,6 +100,7 @@ plugin-kotlin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.
 postgresql-driver = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 
 test-ktor-server-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
+test-ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 testcontainers-bom = { module = "org.testcontainers:testcontainers-bom", version.ref = "testcontainers" }
 testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql" }
 

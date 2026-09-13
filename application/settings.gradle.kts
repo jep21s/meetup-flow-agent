@@ -29,3 +29,5 @@ plugins {
 
 rootProject.name = "application"
 include("main")
+include("test")
+include("evals")

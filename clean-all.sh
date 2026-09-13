@@ -4,6 +4,8 @@ set -euo pipefail
 
 ./gradlew \
   :application:main:clean \
+  :application:test:clean \
+  :application:evals:clean \
   :libs:jackson-starter:clean \
   :libs:logging-starter:clean \
   :libs:config-starter:clean \
