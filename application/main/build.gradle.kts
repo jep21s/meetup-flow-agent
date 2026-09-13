@@ -27,6 +27,18 @@ dependencies {
   implementation(libs.ktor.client.cio)
   implementation(libs.ktor.client.content.negotiation)
   implementation(libs.jsoup)
+
+  // БД: Postgres + pgvector (Exposed только маппит таблицы; DDL — Liquibase, §6)
+  implementation(platform(libs.exposed.bom))
+  implementation(libs.exposed.core)
+  implementation(libs.exposed.jdbc)
+  implementation(libs.exposed.java.time)
+  implementation(libs.exposed.json)
+  implementation(libs.hikaricp)
+  implementation(libs.liquibase.core)
+  // liquibase-core помечает picocli как optional, но рантайм Liquibase 5 требует его (CommandScope)
+  implementation(libs.picocli)
+  implementation(libs.postgresql.driver)
 }
 
 tasks.register<Jar>("fatJar") {

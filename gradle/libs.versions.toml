@@ -29,6 +29,7 @@ logging-kotlin = "8.0.4"
 
 micrometer = "1.17.1"
 mockk = "1.14.11"
+picocli = "4.7.7"
 
 opentelemetry = "1.66.0"
 postgresql = "42.7.13"
@@ -44,6 +45,7 @@ exposed-bom = { module = "org.jetbrains.exposed:exposed-bom", version.ref = "exp
 exposed-core = { module = "org.jetbrains.exposed:exposed-core" }
 exposed-jdbc = { module = "org.jetbrains.exposed:exposed-jdbc" }
 exposed-java-time = { module = "org.jetbrains.exposed:exposed-java-time" }
+exposed-json = { module = "org.jetbrains.exposed:exposed-json" }
 
 hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
 
@@ -101,6 +103,8 @@ opentelemetry-bom = { module = "io.opentelemetry:opentelemetry-bom", version.ref
 opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api" }
 opentelemetry-sdk = { module = "io.opentelemetry:opentelemetry-sdk" }
 opentelemetry-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp" }
+
+picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
 
 plugin-kotlin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlinVersion" }
 
