@@ -6,6 +6,7 @@ import org.jep21s.meetupflowagent.agent.tools.ToolPolicies
 import org.jep21s.meetupflowagent.agent.tools.ToolPolicyMode
 import org.jep21s.meetupflowagent.agent.tools.ToolResult
 import org.jep21s.meetupflowagent.llm.LlmClient
+import org.jep21s.meetupflowagent.llm.StreamDelta
 import org.jep21s.meetupflowagent.llm.dto.ChatCompletionRequest
 import org.jep21s.meetupflowagent.llm.dto.ChatMessage
 import org.jep21s.meetupflowagent.llm.dto.FunctionSpec
@@ -33,8 +34,11 @@ data class AgentReply(
 /**
  * Мини-ReAct-цикл (этап 2): Reason (вызов LLM с описаниями тулов) → Act (исполнение
  * tool_calls) → Observe (результат в историю). Финал — контент модели без tool_calls.
- * Без БД, без стриминга, лимит — константа [MAX_ITERATIONS] (полный лимит с
- * прогресс-детектором — этап 6).
+ *
+ * ДЗ3: контекст цикла — [ConversationState] (вся история уходит в каждый вызов LLM);
+ * [processStream] стримит ход прогона событиями [AgentStreamEvent] (дельты модели
+ * пробрасываются наружу по мере поступления). Без БД, без replay-SSE (это project);
+ * лимит — константа [MAX_ITERATIONS] (полный лимит с прогресс-детектором — этап 6).
  */
 @Singleton
 class SyncAgentService(
@@ -55,7 +59,17 @@ class SyncAgentService(
     )
   }
 
-  suspend fun process(userText: String): AgentReply {
+  suspend fun process(userText: String): AgentReply = runLoop(userText, emit = null)
+
+  suspend fun processStream(
+    userText: String,
+    emit: suspend (AgentStreamEvent) -> Unit,
+  ): AgentReply = runLoop(userText, emit)
+
+  private suspend fun runLoop(
+    userText: String,
+    emit: (suspend (AgentStreamEvent) -> Unit)? = null,
+  ): AgentReply {
     val model = ConfigLoader.getRequiredProperty(
       "llm.agent.model",
       "llm.agent.model is not configured",
@@ -69,32 +83,52 @@ class SyncAgentService(
     val toolCallsLog = mutableListOf<ToolCallRecord>()
 
     for (iteration in 1..MAX_ITERATIONS) {
-      val response = llmClient.complete(
-        ChatCompletionRequest(model = model, messages = state.snapshot(), tools = toolSpecs),
-      )
+      val request = ChatCompletionRequest(model = model, messages = state.snapshot(), tools = toolSpecs)
+      val response = if (emit == null) {
+        llmClient.complete(request)
+      } else {
+        llmClient.streamChat(request) { delta ->
+          when (delta) {
+            is StreamDelta.ReasoningDelta -> emit(AgentStreamEvent.ReasoningDelta(delta.text))
+            is StreamDelta.ContentDelta -> emit(AgentStreamEvent.ContentDelta(delta.text))
+            // полные tool_call-ы эмитим из собранного ответа ниже; Finish наружу не нужен
+            is StreamDelta.ToolCallDelta, is StreamDelta.Finish -> Unit
+          }
+        }
+      }
       val assistantMessage = response.firstMessage()
 
       val calls = assistantMessage.toolCalls.orEmpty()
       if (calls.isEmpty()) {
-        return AgentReply(
+        val reply = AgentReply(
           reply = assistantMessage.content.orEmpty(),
           toolCalls = toolCallsLog,
           iterations = iteration,
           limitReached = false,
         )
+        emit?.invoke(AgentStreamEvent.Final(reply))
+        return reply
       }
 
       state.add(assistantMessage)
       for (call in calls) {
+        emit?.invoke(AgentStreamEvent.ToolCall(call.function.name, call.function.arguments))
         val observation = executeWithPolicy(call.function.name, call.function.arguments)
         toolCallsLog += observation.record
         state.add(ChatMessage.tool(call.id, observation.observationText))
+        emit?.invoke(
+          AgentStreamEvent.ToolResult(
+            ok = observation.record.ok,
+            text = observation.observationText,
+            errorCode = observation.record.errorCode,
+          ),
+        )
       }
     }
 
     // Лимит исчерпан: возвращаем последний контент (или пометку), строгая валидация — этап 5.
     val lastContent = state.lastAssistantContent().orEmpty()
-    return AgentReply(
+    val reply = AgentReply(
       reply = lastContent.ifBlank {
         "Лимит итераций агента ($MAX_ITERATIONS) исчерпан до финального ответа."
       },
@@ -102,6 +136,8 @@ class SyncAgentService(
       iterations = MAX_ITERATIONS,
       limitReached = true,
     )
+    emit?.invoke(AgentStreamEvent.Final(reply))
+    return reply
   }
 
   private suspend fun executeWithPolicy(
