@@ -40,6 +40,10 @@ dependencies {
   implementation(libs.picocli)
   implementation(libs.postgresql.driver)
   implementation(libs.micrometer.registry.prometheus)
+  implementation(platform(libs.opentelemetry.bom))
+  implementation(libs.opentelemetry.api)
+  implementation(libs.opentelemetry.sdk)
+  implementation(libs.opentelemetry.exporter.otlp)
 }
 
 tasks.register<Jar>("fatJar") {

@@ -84,6 +84,7 @@ class AgentFlowService(
   private val humanRequestRepository: org.jep21s.meetupflowagent.db.HumanRequestRepository,
   private val proxyNotifier: org.jep21s.meetupflowagent.notify.ProxyNotifier,
   private val flowEventBus: FlowEventBus = FlowEventBus(),
+  private val tracing: org.jep21s.meetupflowagent.observability.Tracing = org.jep21s.meetupflowagent.observability.Tracing(),
 ) {
 
   private val systemPrompt: String by lazy { systemPromptBuilder.build() }
@@ -114,7 +115,13 @@ class AgentFlowService(
     return try {
       val result = MDC.putCloseable("flowId", flowId.toString()).use {
         withContext(MDCContext()) {
-          runLoop(flowId, rawText, model, emit = null)
+          val span = tracing.startFlowSpan(flowId.toString())
+          try {
+            span.setAttribute("inboxId", inboxId.toString())
+            runLoop(flowId, rawText, model, emit = null)
+          } finally {
+            span.end()
+          }
         }
       }
       metrics.flowStatus(result.status.name)
@@ -163,7 +170,13 @@ class AgentFlowService(
     // flowId в MDC распространяется на все корутины флоу (MDCContext)
     val result = MDC.putCloseable("flowId", flowId.toString()).use {
       withContext(MDCContext()) {
-        runLoop(flowId, message, model, emit)
+        val span = tracing.startFlowSpan(flowId.toString())
+        try {
+          span.setAttribute("message.length", message.length.toLong())
+          runLoop(flowId, message, model, emit)
+        } finally {
+          span.end()
+        }
       }
     }
     metrics.flowStatus(result.status.name)
