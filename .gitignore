@@ -1,0 +1,24 @@
+# Внутренние документы проекта — НЕ для репозитория (В36)
+COMMON_PLAN.md
+PLAN_*.md
+homework.md
+project work.md
+
+# Секреты
+.env
+
+# Gradle
+.gradle/
+build/
+out/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Локальные артефакты
+*.log
