@@ -21,7 +21,11 @@ flowchart LR
     LLM -->|tools| T3["ask_human (HITL)"]
     FLOW --> V["ContractValidator<br/>(детерминированный)"]
     V --> DB[("Postgres 18 + pgvector<br/>flows / flow_steps / events / duplicates")]
-    FLOW -->|notify| P
+    V -->|"APPROVED: атомарно с событием"| OBX["outbox_messages<br/>+ outbox_deliveries"]
+    OBX --> OPOLL["OutboxPoller (5s)"]
+    OPOLL --> TR["OutboxTransport по типу<br/>telegram_proxy | …"]
+    TR --> P
+    FLOW -->|notify (HITL/REMINDER/FAILED)| P
     FLOW -->|SSE /internal/metrics| OUT["Клиент / Prometheus"]
 ```
 
@@ -42,14 +46,40 @@ Resilience: in-request retry LLM (2×, backoff+jitter), retry-шкала фло�
 | Endpoint | Описание |
 |---|---|
 | `POST /api/messages` | `{idempotencyKey?, text, meta?}` → `202 {flowId}`; повтор ключа → `409 {flowId}` |
-| `GET /api/flows/{id}` | флоу + все шаги (включая CoT) + verdict |
+| `GET /api/flows/{id}` | флоу + все шаги (включая CoT) + verdict + `deliveries` (outbox) |
 | `GET /api/flows/{id}/stream` | SSE: replay по `Last-Event-ID` + live; `waiting_human`/`final`/`heartbeat` |
 | `POST /api/flows/{id}/responses` | ответ человека: первый — `202` (резюм), опоздавшие — `409` |
 | `GET /api/events?from&to` | календарь событий |
+| `GET /internal/outbox?status=&destination=` | инспекция публикаций и доставок (без токена) |
 | `GET /internal/metrics` | Prometheus (без токена) |
 
-Исходящие уведомления прокси: `POST {PROXY_BASE_URL}/api/notify` —
-`HUMAN_INPUT_REQUIRED | REMINDER | FLOW_COMPLETED | FLOW_FAILED`.
+Служебные уведомления прокси (напрямую, из потока): `POST {PROXY_BASE_URL}/api/notify` —
+`HUMAN_INPUT_REQUIRED | REMINDER | FLOW_FAILED`.
+
+## Публикация результата (outbox)
+
+Успешный результат (APPROVED-анонс: офлайн, СПб, бесплатно, не дубль) не отправляется
+в потоке обработки — он публикуется отдельным шедулером через **outbox**:
+
+- запись в `outbox_messages` (канонический JSON-снапшот анонса) + fan-out
+  `outbox_deliveries` на каждое активное назначение из справочника `destinations`
+  — **атомарно в одной транзакции с событием календаря**;
+- `OutboxPoller` (5с, kill-switch `SCHEDULER_OUTBOX_ENABLED=false`) клеймит доставки
+  (`FOR UPDATE SKIP LOCKED`) и доставляет транспортом по `destinations.type`;
+  неудача → ретраи `1m→5m→15m→1h→6h` (≤6), затем `FAILED_PERMANENT` (флоу не трогается);
+  зависшие в `SENDING` после краша возвращаются в очередь через 5 минут;
+- семантика **at-least-once**: прокси дедуплицирует по `deliveryId`;
+- transports — точка расширения: `telegram_proxy` (реализован: `EVENT_PUBLISHED` в
+  общий канал через существующий `/api/notify`, готовый текст анонса), гугл-календарь
+  и другие — новые имплементации `OutboxTransport`;
+- секреты (токены) — в ENV, `destinations.config` хранит только не-секретные параметры;
+- наблюдение: блок `deliveries` в `GET /api/flows/{id}`, ручка `GET /internal/outbox`,
+  метрики `meetup_outbox_deliveries_total{status,destination}`, `meetup_outbox_depth`.
+
+Добавление канала публикации: `INSERT INTO destinations (id, type, name, config,
+is_active) VALUES (gen_random_uuid(), '<type>', '<name>', '{}'::jsonb, true)` —
+новые публикации получат доставку в него автоматически (нужна имплементация
+транспорта с тем же `type`, иначе доставка завершится `UNSUPPORTED_TRANSPORT`).
 
 ## Инструменты (SOP)
 
@@ -94,7 +124,7 @@ curl -s localhost:8090/internal/metrics | grep meetup_
 ```
 
 UI наблюдаемости: Jaeger `:16686`, Grafana `:3000` (admin/admin, дашборд
-provivioned), Prometheus `:9090`.
+provisioned), Prometheus `:9090`.
 
 ## Тесты и оценка качества
 
@@ -108,7 +138,7 @@ set -a; source .env; set +a                      # реальные ключи:
 ## Структура
 
 ```
-application/main    # сервис: agent/ llm/ guardrails/ domain/ flow/ db/ scheduler/ notify/ observability/ route/
+application/main    # сервис: agent/ llm/ guardrails/ domain/ flow/ db/ scheduler/ notify/ outbox/ observability/ route/
 application/test    # все unit/integration-тесты (Testcontainers, фейки)
 application/evals   # оценка качества на golden set (реальная модель)
 application/e2e     # сквозные тесты (реальная модель + реальная БД)
