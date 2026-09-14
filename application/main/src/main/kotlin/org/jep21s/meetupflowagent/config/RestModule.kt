@@ -19,6 +19,7 @@ import org.jep21s.meetupflowagent.route.flowStream
 import org.jep21s.meetupflowagent.route.events
 import org.jep21s.meetupflowagent.route.flows
 import org.jep21s.meetupflowagent.route.internalMetrics
+import org.jep21s.meetupflowagent.route.internalOutbox
 import org.jep21s.meetupflowagent.route.messages
 import org.jep21s.meetupflowagent.route.ping
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
@@ -61,6 +62,7 @@ fun Application.restModule() {
       call.respondText("Hello World!")
     }
     internalMetrics()
+    internalOutbox()
     route("/api") {
       requireTokenAuth(appToken)
       ping()
