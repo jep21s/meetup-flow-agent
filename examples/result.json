@@ -1,0 +1,12 @@
+{
+  "flowId": "c262bdce-deff-43ab-9708-66c5544fb872",
+  "status": "COMPLETED",
+  "verdict": { "status": "APPROVED", "reasons": [] },
+  "eventId": "3cba2bd0-ee4a-420f-a3be-001ebba4de11",
+  "reply": "{\"title\":\"SPb Go Community #20\",\"organizer\":\"SPb Go Community\",\"city\":\"Санкт-Петербург\",\"isFree\":true,\"formats\":[\"OFFLINE\"],\"address\":\"Съезжинская улица, 26\",\"venueName\":\"Кронверк\",\"startsAt\":\"2026-10-15T19:00+03:00\",\"endsAt\":\"2026-10-15T21:30+03:00\",\"registrationUrl\":\"https://gospb.timepad.ru\",\"language\":\"RU\",\"confidence\":0.93}",
+  "toolCalls": [
+    { "name": "search_duplicate", "args": "{\"eventDate\":\"2026-10-15\",\"organizer\":\"SPb Go Community\",\"query\":\"SPb Go Community #20 | SPb Go Community | 2026-10-15 | Кронверк\"}", "ok": true }
+  ],
+  "iterations": 2,
+  "limitReached": false
+}

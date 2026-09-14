@@ -47,14 +47,16 @@ class InboxRepository(private val db: DatabaseConnectivity) {
         exec(
           """INSERT INTO inbox_messages (id, idempotency_key, raw_text, source_meta, status)
              VALUES (?::uuid, ?, ?, ?::jsonb, 'NEW')
-             ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING""",
+             ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+             RETURNING id""",
           args = listOf(
             TextColumnType() to id.toString(),
             VarCharColumnType(128) to idempotencyKey,
             TextColumnType() to rawText,
             TextColumnType() to sourceMeta?.let { jacksonMapper.writeValueAsString(it) },
           ),
-        ) { rs -> if (rs.next()) 1 else 0 }
+          explicitStatementType = org.jetbrains.exposed.v1.core.statements.StatementType.SELECT,
+        ) { rs -> if (rs.next()) 1 else 0 }  // RETURNING id: строка есть ⇔ вставка произошла
       }
     } ?: 0
     return if (inserted == 0) {
@@ -77,6 +79,7 @@ class InboxRepository(private val db: DatabaseConnectivity) {
            WHERE id IN (SELECT id FROM inbox_messages WHERE status = 'NEW' LIMIT ? FOR UPDATE SKIP LOCKED)
            RETURNING id, idempotency_key, raw_text, status, flow_id""",
         args = listOf(IntegerColumnType() to limit),
+        explicitStatementType = org.jetbrains.exposed.v1.core.statements.StatementType.SELECT,
       ) { rs ->
         val rows = mutableListOf<InboxRow>()
         while (rs.next()) {

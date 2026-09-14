@@ -83,6 +83,7 @@ class FlowRepository(private val db: DatabaseConnectivity) {
            WHERE id IN (SELECT id FROM flows WHERE status = 'WAITING_RETRY' AND next_retry_at <= ? LIMIT ? FOR UPDATE SKIP LOCKED)
            RETURNING id""",
         args = listOf(JavaInstantColumnType() to now, IntegerColumnType() to limit),
+        explicitStatementType = org.jetbrains.exposed.v1.core.statements.StatementType.SELECT,
       ) { rs ->
         val ids = mutableListOf<UUID>()
         while (rs.next()) ids += UUID.fromString(rs.getString("id"))
