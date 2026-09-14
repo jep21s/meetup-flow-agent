@@ -4,29 +4,29 @@
 из Telegram-группы (через прокси-проект), извлекающий структурированные данные
 ReAct-циклом (LLM + инструменты), валидирующий их детерминированным кодом и
 складывающий в календарь (Postgres + pgvector) с защитой от дублей, guardrails,
-HITL и полным аудитом исполнения.
+HITL, полным аудитом исполнения и отложенной публикацией проверенных анонсов
+(outbox → несколько назначений).
 
 ## Архитектура
 
 ```mermaid
 flowchart LR
-    P["Telegram-прокси"] -->|"POST /api/messages"| API["Ktor REST API"]
-    API --> IN["inbox_messages<br/>(idempotency)"]
-    IN --> POLL["InboxPoller (5s)"]
-    POLL --> FLOW["FlowEngine (стейт-машина)"]
-    G["Guardrails<br/>детерминизм + glm-5.3"] --> FLOW
-    FLOW -->|"ReAct-цикл"| LLM["glm-5.3-flash<br/>(Reason→Act→Observe)"]
-    LLM -->|tools| T1["fetch_web_page<br/>(SSRF-guard)"]
-    LLM -->|tools| T2["search_duplicate<br/>(pgvector + фильтры)"]
-    LLM -->|tools| T3["ask_human (HITL)"]
-    FLOW --> V["ContractValidator<br/>(детерминированный)"]
-    V --> DB[("Postgres 18 + pgvector<br/>flows / flow_steps / events / duplicates")]
-    V -->|"APPROVED: атомарно с событием"| OBX["outbox_messages<br/>+ outbox_deliveries"]
-    OBX --> OPOLL["OutboxPoller (5s)"]
-    OPOLL --> TR["OutboxTransport по типу<br/>telegram_proxy | …"]
-    TR --> P
-    FLOW -->|notify (HITL/REMINDER/FAILED)| P
-    FLOW -->|SSE /internal/metrics| OUT["Клиент / Prometheus"]
+    P["Telegram-прокси"] -->|"POST /api/messages (Bearer)"| API["Ktor REST API"]
+    API --> IN[("inbox_messages<br/>(idempotency: 202 / 409)")]
+    IN -->|"клейм SKIP LOCKED"| SCHED["Шедулеры на общем скоупе:<br/>Inbox 5с · Retry 15с ·<br/>HumanTimeout 1ч · Outbox 5с<br/>(kill-switch на каждый)"]
+    SCHED --> FLOW["FlowEngine — стейт-машина<br/>(flow_steps: полный аудит + CoT)"]
+    FLOW -->|"шаг 0"| G["Guardrails:<br/>детерминизм + glm-5.3<br/>вердикт ≠ PASS → REJECTED"]
+    FLOW <-->|"ReAct-цикл<br/>function calling"| LLM["glm-5.3-flash<br/>Reason → Act → Observe"]
+    LLM --> TOOLS["Инструменты:<br/>fetch_web_page (SSRF-guard)<br/>search_duplicate (pgvector ±3 дня)<br/>ask_human (HITL)"]
+    TOOLS --> DB[("Postgres 18 + pgvector<br/>events · flows · flow_steps ·<br/>duplicates · human_requests")]
+    FLOW -->|"финальный JSON"| V["ContractParser →<br/>ContractValidator<br/>(детерминированный)"]
+    V -->|"APPROVED: событие + публикация<br/>одной транзакцией"| OBX[("outbox_messages +<br/>outbox_deliveries — fan-out<br/>на активные destinations")]
+    OBX -->|"OutboxPoller: клейм + ретраи<br/>1m..6h (≤6)<br/>at-least-once (deliveryId)"| TR["OutboxTransport<br/>по destinations.type:<br/>telegram_proxy → EVENT_PUBLISHED;<br/>google_calendar — точка расширения"]
+    TR -->|"POST /api/notify"| P
+    FLOW -->|"HUMAN_INPUT_REQUIRED"| P
+    SCHED -->|"REMINDER · FLOW_FAILED"| P
+    C["Клиент"] -.->|"GET /api/flows/{id}/stream — SSE<br/>(replay по Last-Event-ID + live)"| API
+    PROM["Prometheus"] -.->|"scrape /internal/metrics"| API
 ```
 
 **Модели и роутинг** (критерий «разные модели для разных задач»):
@@ -37,9 +37,12 @@ flowchart LR
 | Агентский цикл (извлечение) | **glm-5.3-flash** | массовые циклы — дешёвая быстрая модель |
 | Эмбеддинги (дубль-чек) | **Yandex text-embeddings-v2-doc (768d)** | дешёвые RU-эмбеддинги, pgvector |
 
-**Стейт-машина флоу**: `PROCESSING → {COMPLETED, REJECTED, DUPLICATE, WAITING_HUMAN, WAITING_RETRY}`;
-лимит циклов ReAct 8 → +4 при прогрессе (детектор по сигнатуре фактов+тулов) → 16; на капе — ask_human.
-Resilience: in-request retry LLM (2×, backoff+jitter), retry-шкала флоу 1m→5m→15m→1h→6h (≤6), CircuitBreaker.
+**Стейт-машина флоу**: `PROCESSING → {COMPLETED, REJECTED, DUPLICATE, WAITING_HUMAN,
+WAITING_RETRY, …}` (полная матрица — `flow/FlowStatus.kt`); лимит циклов ReAct 8 → +4
+при прогрессе (детектор по сигнатуре фактов+тулов) → 16; на капе — ask_human.
+Resilience: in-request retry LLM (2×, backoff+jitter), retry-шкала флоу 1m→5m→15m→1h→6h
+(≤6, затем FAILED_PERMANENT), CircuitBreaker; доставки outbox — та же шкала ретраев,
+но не трогают статус флоу.
 
 ## API (Bearer `APP_TOKEN` на /api)
 
@@ -111,7 +114,8 @@ NEEDS_REVIEW; дубль ≥0.92 → DUPLICATE.
 
 ```bash
 cp .env.example .env            # заполнить: APP_TOKEN, LLM_API_KEY (Z.AI),
-                                # EMBEDDING_API_KEY, EMBEDDING_FOLDER_ID, DB_PASSWORD
+                                # EMBEDDING_API_KEY, EMBEDDING_FOLDER_ID, DB_PASSWORD,
+                                # PROXY_BASE_URL/PROXY_TOKEN (куда доставлять публикации)
 docker compose up -d postgres   # (+ jaeger/prometheus/grafana — тем же файлом)
 ./gradlew :application:main:run
 
