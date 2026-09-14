@@ -49,6 +49,11 @@ class GuardrailsFlowIT : PostgresTestBase() {
       flowRepository = flowRepository,
       flowStepRepository = flowStepRepository,
       eventRepository = eventRepository,
+      outboxRepository = org.jep21s.meetupflowagent.db.OutboxRepository(
+        testConnectivity(),
+        org.jep21s.meetupflowagent.db.DestinationRepository(testConnectivity()),
+        eventRepository,
+      ),
       embeddingClient = embedder,
       guardrailsService = GuardrailsService(LlmGuardrails(fake)),
       metrics = metrics,

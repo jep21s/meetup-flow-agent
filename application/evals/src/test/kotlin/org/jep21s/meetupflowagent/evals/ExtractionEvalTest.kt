@@ -64,6 +64,11 @@ class ExtractionEvalTest {
       flowRepository = flowRepository,
       flowStepRepository = stepRepository,
       eventRepository = eventRepository,
+      outboxRepository = org.jep21s.meetupflowagent.db.OutboxRepository(
+        db,
+        org.jep21s.meetupflowagent.db.DestinationRepository(db),
+        eventRepository,
+      ),
       embeddingClient = YandexEmbeddingClient(),
       guardrailsService = org.jep21s.meetupflowagent.guardrails.GuardrailsService(guardrails),
       metrics = Metrics.inMemory(),
@@ -73,7 +78,7 @@ class ExtractionEvalTest {
 
     // чистим рабочие таблицы: дубль-чек не должен находить события прошлых прогонов
     db.dataSource.connection.use { connection ->
-      connection.createStatement().use { stmt -> stmt.execute("TRUNCATE duplicates, events, flow_steps, human_requests, flows, inbox_messages") }
+      connection.createStatement().use { stmt -> stmt.execute("TRUNCATE outbox_deliveries, outbox_messages, duplicates, events, flow_steps, human_requests, flows, inbox_messages") }
     }
 
     val cases = harness.loadCases("/golden/extraction/cases.json")

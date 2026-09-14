@@ -2,16 +2,24 @@ package org.jep21s.meetupflowagent.e2e
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
+import com.github.tomakehurst.wiremock.WireMockServer
+import com.github.tomakehurst.wiremock.client.WireMock.ok
+import com.github.tomakehurst.wiremock.client.WireMock.post
+import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
+import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig
 import org.jep21s.meetupflowagent.agent.context.FileContextProvider
 import org.jep21s.meetupflowagent.agent.context.SystemPromptBuilder
 import org.jep21s.meetupflowagent.agent.tools.AskHumanTool
 import org.jep21s.meetupflowagent.agent.tools.FetchWebPageTool
 import org.jep21s.meetupflowagent.agent.tools.SearchDuplicateTool
 import org.jep21s.meetupflowagent.db.DatabaseConnectivity
+import org.jep21s.meetupflowagent.db.DestinationRepository
 import org.jep21s.meetupflowagent.db.EventRepository
 import org.jep21s.meetupflowagent.db.FlowRepository
 import org.jep21s.meetupflowagent.db.FlowStepRepository
 import org.jep21s.meetupflowagent.db.HumanRequestRepository
+import org.jep21s.meetupflowagent.db.OutboxRepository
 import org.jep21s.meetupflowagent.flow.AgentFlowService
 import org.jep21s.meetupflowagent.flow.FlowStatus
 import org.jep21s.meetupflowagent.guardrails.GuardrailsService
@@ -21,6 +29,8 @@ import org.jep21s.meetupflowagent.llm.YandexEmbeddingClient
 import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.notify.ProxyNotifier
 import org.jep21s.meetupflowagent.observability.Metrics
+import org.jep21s.meetupflowagent.outbox.TelegramProxyTransport
+import org.jep21s.meetupflowagent.starter.jackson.jacksonMapper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.BeforeAll
@@ -59,6 +69,7 @@ class FullCycleE2ETest {
 
   private val db = DatabaseConnectivity(org.jep21s.meetupflowagent.db.LiquibaseRunner())
   private val eventRepository = EventRepository(db)
+  private val outboxRepository = OutboxRepository(db, DestinationRepository(db), eventRepository)
   private val notifications = mutableListOf<ProxyNotification>()
 
   private val service = AgentFlowService(
@@ -72,6 +83,7 @@ class FullCycleE2ETest {
     flowRepository = FlowRepository(db),
     flowStepRepository = FlowStepRepository(db),
     eventRepository = eventRepository,
+    outboxRepository = outboxRepository,
     embeddingClient = YandexEmbeddingClient(),
     guardrailsService = GuardrailsService(LlmGuardrails(KtorOpenAiLlmClient())),
     metrics = Metrics.inMemory(),
@@ -87,9 +99,12 @@ class FullCycleE2ETest {
   fun cleanWorkspace() {
     db.dataSource.connection.use { connection ->
       connection.createStatement().use { stmt ->
-        stmt.execute("TRUNCATE duplicates, events, flow_steps, human_requests, flows, inbox_messages")
+        stmt.execute("TRUNCATE outbox_deliveries, outbox_messages, duplicates, events, flow_steps, human_requests, flows, inbox_messages")
+        stmt.execute("UPDATE destinations SET is_active = true")
       }
     }
+    System.clearProperty("proxy.baseUrl")
+    System.clearProperty("proxy.token")
   }
 
   @Test
@@ -134,6 +149,55 @@ class FullCycleE2ETest {
     }
     assertEquals(FlowStatus.DUPLICATE, second.status, "повторный анонс должен быть дублем: reply=${second.reply.take(200)}")
     assertNotNull(second.duplicateOf)
+  }
+
+  @Test
+  fun `approved result is published through outbox to telegram proxy`() {
+    val proxyStub = WireMockServer(wireMockConfig().dynamicPort())
+    proxyStub.start()
+    proxyStub.stubFor(post(urlEqualTo("/api/notify")).willReturn(ok()))
+    System.setProperty("proxy.baseUrl", proxyStub.baseUrl())
+    try {
+      val result = runBlocking {
+        service.run(
+          "Митап «Python SPb» #33: пятница 20 ноября 2026, 19:00, «Библиотека им. Ленина» " +
+            "(наб. Фонтанки 44, Санкт-Петербург). Бесплатно, регистрация https://py-spb.timepad.ru, " +
+            "окончание в 21:00. Доклады про asyncio и типизацию.",
+        )
+      }
+      assertEquals(FlowStatus.COMPLETED, result.status, "флоу должен завершиться: reply=${result.reply.take(200)}")
+      assertEquals("APPROVED", result.verdictStatus.name)
+
+      // успешный результат сразу получил задание на доставку (атомарно с событием)
+      val deliveries = runBlocking { outboxRepository.deliveriesByFlow(result.flowId) }
+      assertTrue(deliveries.isNotEmpty(), "должна быть хотя бы одна доставка (destinations из compose-БД)")
+      assertEquals("PENDING", deliveries.first().status)
+
+      // такт доставки: клейм → транспорт → SENT; транспорт бьёт в WireMock-прокси
+      val transport = TelegramProxyTransport()
+      runBlocking {
+        for (task in outboxRepository.claimPending(limit = 10)) {
+          transport.deliver(task)
+          outboxRepository.markSent(task.deliveryId)
+        }
+      }
+
+      assertEquals("SENT", runBlocking {
+        outboxRepository.deliveriesByFlow(result.flowId).first().status
+      })
+      val requests = proxyStub.findAll(postRequestedFor(urlEqualTo("/api/notify")))
+      assertTrue(requests.isNotEmpty(), "прокси должен получить публикацию")
+      val body = jacksonMapper.readTree(requests.last().bodyAsString)
+      assertEquals("EVENT_PUBLISHED", body.path("event").asText())
+      assertTrue(body.path("userIds").isEmpty, "публикация адресована общему каналу")
+      assertTrue(
+        body.path("text").asText().contains("Python SPb"),
+        "текст анонса должен содержать название: ${body.path("text").asText().take(200)}",
+      )
+      assertEquals(result.flowId.toString(), body.path("flowId").asText())
+    } finally {
+      proxyStub.stop()
+    }
   }
 }
 

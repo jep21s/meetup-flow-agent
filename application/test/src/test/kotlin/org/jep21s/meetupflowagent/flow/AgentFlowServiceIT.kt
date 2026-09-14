@@ -38,6 +38,12 @@ class AgentFlowServiceIT : PostgresTestBase() {
   private val eventRepository = EventRepository(testConnectivity())
   private val flowRepository = FlowRepository(testConnectivity())
   private val flowStepRepository = FlowStepRepository(testConnectivity())
+  private val outboxRepository =
+    org.jep21s.meetupflowagent.db.OutboxRepository(
+      testConnectivity(),
+      org.jep21s.meetupflowagent.db.DestinationRepository(testConnectivity()),
+      eventRepository,
+    )
 
   /** Эмбеддер с явными векторами по подстрокам текста (контроль similarity). */
   private class ScriptedEmbedder(
@@ -61,6 +67,7 @@ class AgentFlowServiceIT : PostgresTestBase() {
       flowRepository = flowRepository,
       flowStepRepository = flowStepRepository,
       eventRepository = eventRepository,
+      outboxRepository = outboxRepository,
       embeddingClient = embedder,
       guardrailsService = passGuardrails,
       metrics = metrics,
@@ -126,6 +133,12 @@ class AgentFlowServiceIT : PostgresTestBase() {
     assertThat(snapshot!!.path("snapshotVersion").asInt()).isEqualTo(1)
     assertThat(snapshot.path("messages").size()).isGreaterThan(0)
     assertThat(flow.status).isEqualTo("COMPLETED")
+
+    // успешный результат получает публикацию outbox: доставка на сеянное назначение
+    val deliveries = runBlocking { outboxRepository.deliveriesByFlow(result.flowId) }
+    assertThat(deliveries).hasSize(1)
+    assertThat(deliveries.single().destinationName).isEqualTo("telegram_main")
+    assertThat(deliveries.single().status).isEqualTo("PENDING")
   }
 
   @Test
@@ -138,6 +151,8 @@ class AgentFlowServiceIT : PostgresTestBase() {
     assertThat(result.verdictStatus.name).isEqualTo("REJECTED")
     assertThat(result.reasons).contains("PAID")
     assertThat(result.eventId).isNull()
+    // отклонённый результат НЕ публикуется
+    assertThat(runBlocking { outboxRepository.deliveriesByFlow(result.flowId) }).isEmpty()
   }
 
   @Test
@@ -234,6 +249,7 @@ class AgentFlowServiceIT : PostgresTestBase() {
       flowRepository = flowRepository,
       flowStepRepository = flowStepRepository,
       eventRepository = eventRepository,
+      outboxRepository = outboxRepository,
       embeddingClient = embedder,
       guardrailsService = passGuardrails,
       metrics = metrics,

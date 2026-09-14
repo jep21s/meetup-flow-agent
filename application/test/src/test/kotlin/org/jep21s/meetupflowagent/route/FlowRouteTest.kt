@@ -42,6 +42,7 @@ class FlowRouteTest {
   private val flowRepository: FlowRepository = mockk(relaxed = true)
   private val flowStepRepository: FlowStepRepository = mockk(relaxed = true)
   private val inboxRepository: InboxRepository = mockk(relaxed = true)
+  private val outboxRepository: org.jep21s.meetupflowagent.db.OutboxRepository = mockk(relaxed = true)
 
   @BeforeEach
   fun startKoinWithMocks() {
@@ -52,6 +53,7 @@ class FlowRouteTest {
           single { flowRepository }
           single { flowStepRepository }
           single { inboxRepository }
+          single { outboxRepository }
         },
       )
     }
