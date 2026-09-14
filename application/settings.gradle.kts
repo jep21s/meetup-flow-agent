@@ -31,3 +31,4 @@ rootProject.name = "application"
 include("main")
 include("test")
 include("evals")
+include("e2e")
