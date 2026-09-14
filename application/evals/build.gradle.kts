@@ -16,6 +16,15 @@ dependencies {
 
   implementation(libs.bundles.kotlinx.coroutines)
   implementation(libs.bundles.ktor.server)
+  implementation(libs.ktor.client.core)
+  implementation(libs.ktor.client.cio)
+  implementation(platform(libs.exposed.bom))
+  implementation(libs.exposed.core)
+  implementation(libs.exposed.jdbc)
+  implementation(libs.exposed.java.time)
+  implementation(libs.exposed.json)
+  implementation(libs.hikaricp)
+  implementation(libs.postgresql.driver)
 
   testImplementation(libs.bundles.junit)
   testImplementation(libs.kotlinx.coroutines.test)
@@ -27,6 +36,7 @@ dependencies {
 }
 
 tasks.test {
+  environment("LLM_API_KEY", System.getenv("LLM_API_KEY") ?: "test-key")
   jvmArgs = listOf(
     "--add-opens=java.base/java.time=ALL-UNNAMED",
     "--add-opens=java.base/java.lang=ALL-UNNAMED",

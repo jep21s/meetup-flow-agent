@@ -47,7 +47,10 @@ object ContractValidator {
     if (dto.startsAt != null && startsAt == null) {
       review += "BAD_STARTS_AT"
     }
-    if (dto.registrationUrl.isNullOrBlank() || dto.endsAt.isNullOrBlank() || dto.venueName.isNullOrBlank()) {
+    // venueName некритичен при известном address (Площадь Конституции, 2 — адрес и есть площадка)
+    if (dto.registrationUrl.isNullOrBlank() || dto.endsAt.isNullOrBlank() ||
+      (dto.venueName.isNullOrBlank() && dto.address.isNullOrBlank())
+    ) {
       review += "MISSING_DATA"
     }
 
