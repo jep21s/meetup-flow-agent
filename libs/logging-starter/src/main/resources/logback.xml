@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Console appender with JSON for Docker/Fluent-bit -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <!-- Include MDC context -->
+            <includeMdc>true</includeMdc>
+
+            <!-- Custom fields for Ktor service (overridable per deployment via -DSERVICE_NAME / env) -->
+            <customFields>
+                {
+                "service": "${SERVICE_NAME:-main-service}"
+                }
+            </customFields>
+
+            <!-- Field names mapping -->
+            <fieldNames>
+                <timestamp>@timestamp</timestamp>
+                <level>level</level>
+                <logger>logger_name</logger>
+                <thread>thread_name</thread>
+                <message>message</message>
+                <stackTrace>stack_trace</stackTrace>
+            </fieldNames>
+
+            <!-- Time settings -->
+            <timeZone>UTC</timeZone>
+            <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</timestampPattern>
+
+            <!-- Include caller data (optional) -->
+            <includeCallerData>false</includeCallerData>
+        </encoder>
+    </appender>
+
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- Application package -->
+    <logger name="org.jep21s.meetupflowagent" level="DEBUG"/>
+</configuration>

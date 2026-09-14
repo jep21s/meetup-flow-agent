@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: meetup-flow-agent
+    metrics_path: /internal/metrics
+    # приложение запускается ВНЕ compose; на linux host.docker.internal пробрасывается extra_hosts
+    static_configs:
+      - targets: ["host.docker.internal:8090"]

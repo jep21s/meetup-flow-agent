@@ -1,0 +1,160 @@
+{
+  "title": "meetup-flow-agent",
+  "uid": "meetup-flow",
+  "timezone": "browser",
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Flows by status",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (status) (increase(meetup_flows_total[1h]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Flow duration (s)",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(meetup_flow_duration_seconds_bucket[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM tokens",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (model, direction) (rate(meetup_llm_tokens_total[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM cost USD (total)",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (meetup_llm_cost_usd_total)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "ReAct cycles",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.9, rate(meetup_react_cycles_bucket[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Guardrails verdicts",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (verdict) (increase(meetup_guardrails_verdicts_total[1h]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool calls",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (tool, outcome) (increase(meetup_tool_calls_total[1h]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM calls by outcome",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (model, outcome) (increase(meetup_llm_calls_total[1h]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox deliveries by outcome",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (status, destination) (increase(meetup_outbox_deliveries_total[1h]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox depth (pending)",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "meetup_outbox_depth"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

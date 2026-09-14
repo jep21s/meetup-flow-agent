@@ -1,0 +1,50 @@
+# Dev-окружение meetup-flow-agent (§17 COMMON_PLAN.md).
+# Приложение всегда запускается ВНЕ compose: ./gradlew :application:main:run
+# (предварительно `docker compose up -d postgres`).
+# jaeger/prometheus/grafana добавлены на этапе project (§17).
+#
+# Переменные ${DB_*} интерполируются из .env в корне (docker compose читает его
+# автоматически); постгрес-образу нужны canonical POSTGRES_* имена.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_DB: ${DB_NAME:-meetup_flow_agent}
+      POSTGRES_USER: ${DB_USER:-meetup}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      # pg18-образ требует маунт на /var/lib/postgresql (данные лягут в 18/docker)
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-meetup} -d ${DB_NAME:-meetup_flow_agent}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  grafana:
+    image: grafana/grafana:11.5.2
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  pgdata:

@@ -1,0 +1,318 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+  <changeSet id="000-enable-pgvector" author="meetup-flow-agent" runInTransaction="false">
+    <comment>Расширение pgvector — первым: тип vector(768) нужен таблице events.</comment>
+    <sql dbms="postgresql">CREATE EXTENSION IF NOT EXISTS vector</sql>
+  </changeSet>
+
+  <changeSet id="010-inbox-messages" author="meetup-flow-agent">
+    <comment>inbox-паттерн: входящие сообщения до обработки; flow_id добавляется в 030 (циклическая связь с flows).</comment>
+    <createTable tableName="inbox_messages">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_inbox_messages"/>
+      </column>
+      <column name="idempotency_key" type="varchar(128)"/>
+      <column name="raw_text" type="text">
+        <constraints nullable="false"/>
+      </column>
+      <column name="source_meta" type="jsonb"/>
+      <column name="received_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="status" type="varchar(16)">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE inbox_messages
+      ADD CONSTRAINT ck_inbox_messages_status CHECK (status IN ('NEW','CLAIMED','DONE','SKIPPED'))</sql>
+  </changeSet>
+
+  <changeSet id="020-flows" author="meetup-flow-agent">
+    <comment>Флоу обработки сообщения: статусная машина + снапшот для резюма.</comment>
+    <createTable tableName="flows">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_flows"/>
+      </column>
+      <column name="inbox_message_id" type="uuid">
+        <constraints foreignKeyName="fk_flows_inbox_message" references="inbox_messages(id)"/>
+      </column>
+      <column name="status" type="varchar(32)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="state_snapshot" type="jsonb"/>
+      <column name="trace_id" type="varchar(64)"/>
+      <column name="retry_count" type="int" defaultValueNumeric="0">
+        <constraints nullable="false"/>
+      </column>
+      <column name="next_retry_at" type="timestamptz"/>
+      <column name="last_error" type="text"/>
+      <column name="verdict" type="jsonb"/>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="updated_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE flows
+      ADD CONSTRAINT ck_flows_status CHECK (status IN
+        ('GUARDRAILS_PASSED','PROCESSING','WAITING_HUMAN','WAITING_TOOL_APPROVAL',
+         'WAITING_RETRY','COMPLETED','REJECTED','DUPLICATE','EXPIRED','FAILED_PERMANENT'))</sql>
+  </changeSet>
+
+  <changeSet id="030-inbox-messages-flow-id" author="meetup-flow-agent">
+    <comment>Обратная ссылка inbox → flow (какой флоу обработал сообщение).</comment>
+    <addColumn tableName="inbox_messages">
+      <column name="flow_id" type="uuid"/>
+    </addColumn>
+    <addForeignKeyConstraint baseTableName="inbox_messages" baseColumnNames="flow_id"
+      constraintName="fk_inbox_messages_flow" referencedTableName="flows" referencedColumnNames="id"/>
+  </changeSet>
+
+  <changeSet id="040-flow-steps" author="meetup-flow-agent">
+    <comment>Полная история агента, включая CoT (reasoning); источник replay-SSE по seq.</comment>
+    <createTable tableName="flow_steps">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_flow_steps"/>
+      </column>
+      <column name="flow_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_flow_steps_flow" references="flows(id)"/>
+      </column>
+      <column name="seq" type="int">
+        <constraints nullable="false"/>
+      </column>
+      <column name="type" type="varchar(24)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="content" type="jsonb">
+        <constraints nullable="false"/>
+      </column>
+      <column name="tokens" type="int"/>
+      <column name="latency_ms" type="int"/>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE flow_steps
+      ADD CONSTRAINT ck_flow_steps_type CHECK (type IN
+        ('GUARDRAILS','REASON','ACTION','OBSERVATION','FINAL','ERROR',
+         'HUMAN_ASK','HUMAN_ANSWER','RESUME','STATUS'))</sql>
+  </changeSet>
+
+  <changeSet id="050-events" author="meetup-flow-agent">
+    <comment>Календарь событий; embedding 768d (Yandex text-embeddings-v2-doc).</comment>
+    <createTable tableName="events">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_events"/>
+      </column>
+      <column name="flow_id" type="uuid">
+        <constraints foreignKeyName="fk_events_flow" references="flows(id)"/>
+      </column>
+      <column name="title" type="varchar(512)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="description" type="text"/>
+      <column name="organizer" type="varchar(256)"/>
+      <column name="city" type="varchar(128)"/>
+      <column name="is_free" type="boolean"/>
+      <column name="price" type="varchar(128)"/>
+      <column name="formats" type="VARCHAR(32) ARRAY"/>
+      <column name="address" type="varchar(512)"/>
+      <column name="venue_name" type="varchar(256)"/>
+      <column name="starts_at" type="timestamptz">
+        <constraints nullable="false"/>
+      </column>
+      <column name="ends_at" type="timestamptz"/>
+      <column name="talks" type="jsonb"/>
+      <column name="registration_url" type="varchar(1024)"/>
+      <column name="source_urls" type="jsonb"/>
+      <column name="language" type="varchar(8)"/>
+      <column name="confidence" type="double precision"/>
+      <column name="raw" type="jsonb"/>
+      <column name="embedding" type="vector(768)"/>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="updated_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+  </changeSet>
+
+  <changeSet id="060-human-requests" author="meetup-flow-agent">
+    <comment>HITL: вопрос агента человеку и накопленные ответы (первый побеждает).</comment>
+    <createTable tableName="human_requests">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_human_requests"/>
+      </column>
+      <column name="flow_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_human_requests_flow" references="flows(id)"/>
+      </column>
+      <column name="question" type="jsonb">
+        <constraints nullable="false"/>
+      </column>
+      <column name="status" type="varchar(16)" defaultValue="PENDING">
+        <constraints nullable="false"/>
+      </column>
+      <column name="answers" type="jsonb"/>
+      <column name="winning_answer" type="jsonb"/>
+      <column name="asked_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="answered_at" type="timestamptz"/>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE human_requests
+      ADD CONSTRAINT ck_human_requests_status CHECK (status IN ('PENDING','ANSWERED','EXPIRED'))</sql>
+  </changeSet>
+
+  <changeSet id="070-duplicates" author="meetup-flow-agent">
+    <comment>Связь «новый флоу — существующее событие»: решение о дубле агентом или человеком.</comment>
+    <createTable tableName="duplicates">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_duplicates"/>
+      </column>
+      <column name="flow_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_duplicates_flow" references="flows(id)"/>
+      </column>
+      <column name="existing_event_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_duplicates_event" references="events(id)"/>
+      </column>
+      <column name="similarity" type="double precision">
+        <constraints nullable="false"/>
+      </column>
+      <column name="decided_by" type="varchar(8)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE duplicates
+      ADD CONSTRAINT ck_duplicates_decided_by CHECK (decided_by IN ('AGENT','HUMAN'))</sql>
+  </changeSet>
+
+  <changeSet id="080-users" author="meetup-flow-agent">
+    <comment>Пользователи TG-группы (для HITL-роутинга и аудита ответов).</comment>
+    <createTable tableName="users">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_users"/>
+      </column>
+      <column name="telegram_user_id" type="bigint">
+        <constraints nullable="false" unique="true" uniqueConstraintName="uq_users_telegram_user_id"/>
+      </column>
+      <column name="display_name" type="varchar(256)"/>
+      <column name="role" type="varchar(32)"/>
+      <column name="is_active" type="boolean" defaultValueBoolean="true">
+        <constraints nullable="false"/>
+      </column>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+  </changeSet>
+
+  <changeSet id="090-destinations" author="meetup-flow-agent">
+    <comment>Справочник мест публикации результата (телеграм-прокси, гугл-календарь, …): связь один-ко-многим из outbox.
+      config — только не-секретные параметры; секреты транспорты берут из ENV.</comment>
+    <createTable tableName="destinations">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_destinations"/>
+      </column>
+      <column name="type" type="varchar(64)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="name" type="varchar(128)">
+        <constraints nullable="false" unique="true" uniqueConstraintName="uq_destinations_name"/>
+      </column>
+      <column name="config" type="jsonb" defaultValueComputed="'{}'::jsonb">
+        <constraints nullable="false"/>
+      </column>
+      <column name="is_active" type="boolean" defaultValueBoolean="true">
+        <constraints nullable="false"/>
+      </column>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="updated_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+  </changeSet>
+
+  <changeSet id="100-outbox-messages" author="meetup-flow-agent">
+    <comment>Публикации успешного результата (APPROVED-анонс): канонический снапшот + fan-out доставок.
+      Одна публикация на флоу; event_id ссылается на опубликованное событие.</comment>
+    <createTable tableName="outbox_messages">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_outbox_messages"/>
+      </column>
+      <column name="flow_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_outbox_messages_flow" references="flows(id)"/>
+      </column>
+      <column name="event_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_outbox_messages_event" references="events(id)"/>
+      </column>
+      <column name="payload" type="jsonb">
+        <constraints nullable="false"/>
+      </column>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE outbox_messages
+      ADD CONSTRAINT uq_outbox_messages_flow UNIQUE (flow_id)</sql>
+  </changeSet>
+
+  <changeSet id="110-outbox-deliveries" author="meetup-flow-agent">
+    <comment>Состояние доставки публикации в конкретное назначение: PENDING → SENDING → SENT,
+      либо ретраи по шкале до FAILED_PERMANENT. At-least-once: прокси дедуплицирует по payload-ключу.</comment>
+    <createTable tableName="outbox_deliveries">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_outbox_deliveries"/>
+      </column>
+      <column name="outbox_message_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_outbox_deliveries_message"
+                     references="outbox_messages(id)" deleteCascade="true"/>
+      </column>
+      <column name="destination_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_outbox_deliveries_destination"
+                     references="destinations(id)"/>
+      </column>
+      <column name="status" type="varchar(32)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="attempts" type="int" defaultValueNumeric="0">
+        <constraints nullable="false"/>
+      </column>
+      <column name="next_retry_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="last_error" type="text"/>
+      <column name="sent_at" type="timestamptz"/>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="updated_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE outbox_deliveries
+      ADD CONSTRAINT ck_outbox_deliveries_status CHECK (status IN
+        ('PENDING','SENDING','SENT','FAILED_PERMANENT'))</sql>
+    <sql dbms="postgresql">ALTER TABLE outbox_deliveries
+      ADD CONSTRAINT uq_outbox_deliveries_message_destination UNIQUE (outbox_message_id, destination_id)</sql>
+  </changeSet>
+
+  <changeSet id="120-seed-destinations" author="meetup-flow-agent">
+    <comment>Стартовое назначение: телеграм-прокси (существующий POST /api/notify).</comment>
+    <sql dbms="postgresql">INSERT INTO destinations (id, type, name, config, is_active)
+      VALUES (gen_random_uuid(), 'telegram_proxy', 'telegram_main', '{}'::jsonb, true)
+      ON CONFLICT (name) DO NOTHING</sql>
+  </changeSet>
+
+</databaseChangeLog>

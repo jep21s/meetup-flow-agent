@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+  <changeSet id="100-inbox-idempotency-unique" author="meetup-flow-agent">
+    <comment>Точные повторы сообщений отбрасываются уникальным индексом (partial: NULL не занимает слот).</comment>
+    <sql dbms="postgresql">CREATE UNIQUE INDEX IF NOT EXISTS uq_inbox_messages_idempotency_key
+      ON inbox_messages (idempotency_key)
+      WHERE idempotency_key IS NOT NULL</sql>
+  </changeSet>
+
+  <changeSet id="110-flows-waiting-retry-partial" author="meetup-flow-agent">
+    <comment>RetryPoller сканирует только WAITING_RETRY с наступившим next_retry_at.</comment>
+    <sql dbms="postgresql">CREATE INDEX IF NOT EXISTS idx_flows_waiting_retry
+      ON flows (status, next_retry_at)
+      WHERE status = 'WAITING_RETRY'</sql>
+  </changeSet>
+
+  <changeSet id="120-flow-steps-flow-seq-unique" author="meetup-flow-agent">
+    <comment>seq уникален в рамках флоу — основа replay-SSE по Last-Event-ID.</comment>
+    <sql dbms="postgresql">CREATE UNIQUE INDEX IF NOT EXISTS uq_flow_steps_flow_seq
+      ON flow_steps (flow_id, seq)</sql>
+  </changeSet>
+
+  <changeSet id="130-events-starts-at" author="meetup-flow-agent">
+    <comment>Выборки календаря по окну дат.</comment>
+    <sql dbms="postgresql">CREATE INDEX IF NOT EXISTS idx_events_starts_at
+      ON events (starts_at)</sql>
+  </changeSet>
+
+  <changeSet id="140-events-embedding-hnsw" author="meetup-flow-agent">
+    <comment>Векторный поиск ближайших соседей (косинусная близость).</comment>
+    <sql dbms="postgresql">CREATE INDEX IF NOT EXISTS idx_events_embedding_hnsw
+      ON events USING hnsw (embedding vector_cosine_ops)</sql>
+  </changeSet>
+
+  <changeSet id="150-outbox-deliveries-pending" author="meetup-flow-agent">
+    <comment>OutboxPoller сканирует только PENDING-доставки с наступившим next_retry_at.</comment>
+    <sql dbms="postgresql">CREATE INDEX IF NOT EXISTS idx_outbox_deliveries_pending
+      ON outbox_deliveries (status, next_retry_at)
+      WHERE status = 'PENDING'</sql>
+  </changeSet>
+
+</databaseChangeLog>

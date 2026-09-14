@@ -11,10 +11,14 @@ project work.md
 .gradle/
 build/
 out/
+!gradle/wrapper/gradle-wrapper.jar
 
 # IDE
 .idea/
 *.iml
+*.ipr
+*.iws
+.kotlin/
 .vscode/
 
 # OS
@@ -22,3 +26,8 @@ out/
 
 # Локальные артефакты
 *.log
+logs/
+data/
+*.db
+*.sqlite
+*.pid
