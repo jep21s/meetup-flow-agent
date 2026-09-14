@@ -1,11 +1,5 @@
 # ДЗ3 — Подключение контекста и streaming
 
-## Постановка
-
-ДЗ3 требует: (1) источник контекста (файл или API), подключённый к агенту;
-(2) streaming ответа модели наружу; (3) простой воспроизводимый сценарий;
-(4) зафиксированная архитектура подключения контекста.
-
 ## Архитектура подключения контекста
 
 ```
@@ -67,24 +61,11 @@ cp .env.example .env   # заполнить LLM_API_KEY, APP_TOKEN
 сообщение о митапе со ссылкой и печатает SSE-поток; по завершении гасит
 приложение.
 
-## Что смотреть на скрине/видео
-
-В терминале после запуска `./scripts/demo.sh` виден поток кадров:
-
-```
-event: reasoning_delta
-data: {"text":"В сообщении есть ссылка — открою страницу..."}
-...
-event: tool_call
-data: {"name":"fetch_web_page","arguments":"{\"url\":\"https://habr.com/...\"}"}
-event: tool_result
-data: {"ok":true,"text":"PiterJS — сообщество... митап 2 октября...","code":null}
-event: content_delta
-data: {"text":"{\"title\":\"PiterJS"}
-...
-event: final
-data: {"reply":"{...итоговый JSON...}","toolCalls":[{"name":"fetch_web_page",...}],"iterations":2,"limitReached":false}
-```
+## Скрины запуска
+![demostration](hw3/1.png)
+![demostration](hw3/2.png)
+![demostration](hw3/3.png)
+![demostration](hw3/4.png)
 
 Демонстрируется: reasoning идёт потоком до вызова тула; `tool_call` →
 `tool_result` между дельтами; итоговый JSON собирается из `content_delta` и
