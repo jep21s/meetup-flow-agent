@@ -216,4 +216,103 @@
     </createTable>
   </changeSet>
 
+  <changeSet id="090-destinations" author="meetup-flow-agent">
+    <comment>Справочник мест публикации результата (телеграм-прокси, гугл-календарь, …): связь один-ко-многим из outbox.
+      config — только не-секретные параметры; секреты транспорты берут из ENV.</comment>
+    <createTable tableName="destinations">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_destinations"/>
+      </column>
+      <column name="type" type="varchar(64)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="name" type="varchar(128)">
+        <constraints nullable="false" unique="true" uniqueConstraintName="uq_destinations_name"/>
+      </column>
+      <column name="config" type="jsonb" defaultValueComputed="'{}'::jsonb">
+        <constraints nullable="false"/>
+      </column>
+      <column name="is_active" type="boolean" defaultValueBoolean="true">
+        <constraints nullable="false"/>
+      </column>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="updated_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+  </changeSet>
+
+  <changeSet id="100-outbox-messages" author="meetup-flow-agent">
+    <comment>Публикации успешного результата (APPROVED-анонс): канонический снапшот + fan-out доставок.
+      Одна публикация на флоу; event_id ссылается на опубликованное событие.</comment>
+    <createTable tableName="outbox_messages">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_outbox_messages"/>
+      </column>
+      <column name="flow_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_outbox_messages_flow" references="flows(id)"/>
+      </column>
+      <column name="event_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_outbox_messages_event" references="events(id)"/>
+      </column>
+      <column name="payload" type="jsonb">
+        <constraints nullable="false"/>
+      </column>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE outbox_messages
+      ADD CONSTRAINT uq_outbox_messages_flow UNIQUE (flow_id)</sql>
+  </changeSet>
+
+  <changeSet id="110-outbox-deliveries" author="meetup-flow-agent">
+    <comment>Состояние доставки публикации в конкретное назначение: PENDING → SENDING → SENT,
+      либо ретраи по шкале до FAILED_PERMANENT. At-least-once: прокси дедуплицирует по payload-ключу.</comment>
+    <createTable tableName="outbox_deliveries">
+      <column name="id" type="uuid">
+        <constraints primaryKey="true" primaryKeyName="pk_outbox_deliveries"/>
+      </column>
+      <column name="outbox_message_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_outbox_deliveries_message"
+                     references="outbox_messages(id)" deleteCascade="true"/>
+      </column>
+      <column name="destination_id" type="uuid">
+        <constraints nullable="false" foreignKeyName="fk_outbox_deliveries_destination"
+                     references="destinations(id)"/>
+      </column>
+      <column name="status" type="varchar(32)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="attempts" type="int" defaultValueNumeric="0">
+        <constraints nullable="false"/>
+      </column>
+      <column name="next_retry_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="last_error" type="text"/>
+      <column name="sent_at" type="timestamptz"/>
+      <column name="created_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+      <column name="updated_at" type="timestamptz" defaultValueComputed="now()">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <sql dbms="postgresql">ALTER TABLE outbox_deliveries
+      ADD CONSTRAINT ck_outbox_deliveries_status CHECK (status IN
+        ('PENDING','SENDING','SENT','FAILED_PERMANENT'))</sql>
+    <sql dbms="postgresql">ALTER TABLE outbox_deliveries
+      ADD CONSTRAINT uq_outbox_deliveries_message_destination UNIQUE (outbox_message_id, destination_id)</sql>
+  </changeSet>
+
+  <changeSet id="120-seed-destinations" author="meetup-flow-agent">
+    <comment>Стартовое назначение: телеграм-прокси (существующий POST /api/notify).</comment>
+    <sql dbms="postgresql">INSERT INTO destinations (id, type, name, config, is_active)
+      VALUES (gen_random_uuid(), 'telegram_proxy', 'telegram_main', '{}'::jsonb, true)
+      ON CONFLICT (name) DO NOTHING</sql>
+  </changeSet>
+
 </databaseChangeLog>

@@ -37,4 +37,11 @@
       ON events USING hnsw (embedding vector_cosine_ops)</sql>
   </changeSet>
 
+  <changeSet id="150-outbox-deliveries-pending" author="meetup-flow-agent">
+    <comment>OutboxPoller сканирует только PENDING-доставки с наступившим next_retry_at.</comment>
+    <sql dbms="postgresql">CREATE INDEX IF NOT EXISTS idx_outbox_deliveries_pending
+      ON outbox_deliveries (status, next_retry_at)
+      WHERE status = 'PENDING'</sql>
+  </changeSet>
+
 </databaseChangeLog>

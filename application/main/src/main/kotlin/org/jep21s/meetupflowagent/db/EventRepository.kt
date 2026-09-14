@@ -69,31 +69,41 @@ class EventRepository(private val db: DatabaseConnectivity) {
   suspend fun insert(event: EventRow): UUID {
     withContext(Dispatchers.IO) {
       suspendTransaction(db.database) {
-        Events.insert {
-          it[id] = event.id.toKotlinUuid()
-          it[flowId] = event.flowId?.toKotlinUuid()
-          it[title] = event.title
-          it[description] = event.description
-          it[organizer] = event.organizer
-          it[city] = event.city
-          it[isFree] = event.isFree
-          it[price] = event.price
-          it[formats] = event.formats
-          it[address] = event.address
-          it[venueName] = event.venueName
-          it[startsAt] = event.startsAt
-          it[endsAt] = event.endsAt
-          it[talks] = event.talks
-          it[registrationUrl] = event.registrationUrl
-          it[sourceUrls] = event.sourceUrls
-          it[language] = event.language
-          it[confidence] = event.confidence
-          it[raw] = event.raw
-          it[embedding] = event.embedding
-        }
+        insertEventInTransaction(event)
       }
     }
     return event.id
+  }
+
+  /**
+   * Вставка события внутри ЧУЖОЙ транзакции: атомарность события и публикации
+   * outbox (OutboxRepository.insertEventAndEnqueue) — не бывает опубликованного
+   * события без задания на доставку. Вызывать только из активной транзакции
+   * (TransactionManager.current()), иначе Exposed упадёт «no transaction».
+   */
+  internal fun insertEventInTransaction(event: EventRow) {
+    Events.insert {
+      it[id] = event.id.toKotlinUuid()
+      it[flowId] = event.flowId?.toKotlinUuid()
+      it[title] = event.title
+      it[description] = event.description
+      it[organizer] = event.organizer
+      it[city] = event.city
+      it[isFree] = event.isFree
+      it[price] = event.price
+      it[formats] = event.formats
+      it[address] = event.address
+      it[venueName] = event.venueName
+      it[startsAt] = event.startsAt
+      it[endsAt] = event.endsAt
+      it[talks] = event.talks
+      it[registrationUrl] = event.registrationUrl
+      it[sourceUrls] = event.sourceUrls
+      it[language] = event.language
+      it[confidence] = event.confidence
+      it[raw] = event.raw
+      it[embedding] = event.embedding
+    }
   }
 
   /** Календарь §11: окно по starts_at (по умолчанию 30 дней вперёд от now). */

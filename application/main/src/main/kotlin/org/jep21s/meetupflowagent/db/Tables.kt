@@ -112,6 +112,40 @@ object Users : Table("users") {
   val createdAt: Column<java.time.Instant> = timestamp("created_at")
 }
 
+@OptIn(ExperimentalUuidApi::class)
+object Destinations : Table("destinations") {
+  val id: Column<kotlin.uuid.Uuid> = uuid("id")
+  val type: Column<String> = varchar("type", 64)
+  val name: Column<String> = varchar("name", 128)
+  val config: Column<JsonNode> = jsonbMandatory("config")
+  val isActive: Column<Boolean> = bool("is_active")
+  val createdAt: Column<java.time.Instant> = timestamp("created_at")
+  val updatedAt: Column<java.time.Instant> = timestamp("updated_at")
+}
+
+@OptIn(ExperimentalUuidApi::class)
+object OutboxMessages : Table("outbox_messages") {
+  val id: Column<kotlin.uuid.Uuid> = uuid("id")
+  val flowId: Column<kotlin.uuid.Uuid> = uuid("flow_id")
+  val eventId: Column<kotlin.uuid.Uuid> = uuid("event_id")
+  val payload: Column<JsonNode> = jsonbMandatory("payload")
+  val createdAt: Column<java.time.Instant> = timestamp("created_at")
+}
+
+@OptIn(ExperimentalUuidApi::class)
+object OutboxDeliveries : Table("outbox_deliveries") {
+  val id: Column<kotlin.uuid.Uuid> = uuid("id")
+  val outboxMessageId: Column<kotlin.uuid.Uuid> = uuid("outbox_message_id")
+  val destinationId: Column<kotlin.uuid.Uuid> = uuid("destination_id")
+  val status: Column<String> = varchar("status", 32)
+  val attempts: Column<Int> = integer("attempts")
+  val nextRetryAt: Column<java.time.Instant> = timestamp("next_retry_at")
+  val lastError: Column<String?> = text("last_error").nullable()
+  val sentAt: Column<java.time.Instant?> = timestamp("sent_at").nullable()
+  val createdAt: Column<java.time.Instant> = timestamp("created_at")
+  val updatedAt: Column<java.time.Instant> = timestamp("updated_at")
+}
+
 /** jsonb-колонка с произвольным JSON-деревом (Jackson). */
 private fun Table.jsonbNullable(name: String): Column<JsonNode?> =
   jsonb<JsonNode>(name, { jacksonMapper.writeValueAsString(it) }, { jacksonMapper.readTree(it) }).nullable()
