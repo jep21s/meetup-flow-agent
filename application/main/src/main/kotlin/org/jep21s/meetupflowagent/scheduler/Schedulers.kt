@@ -15,6 +15,7 @@ import org.jep21s.meetupflowagent.flow.AgentFlowService
 import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.notify.ProxyNotifier
 import org.jep21s.meetupflowagent.observability.Metrics
+import org.jep21s.meetupflowagent.outbox.OutboxDeliveryPoller
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -44,8 +45,9 @@ object RetrySchedule {
 /**
  * Шедулеры на applicationCoroutineScope (§12): InboxPoller (клейм NEW-сообщений →
  * исполнение флоу), RetryPoller (WAITING_RETRY по расписанию → резюм),
- * HumanTimeoutPoller (REMINDER 24ч / EXPIRED 48ч). Kill-switch'ы: конфиг
- * scheduler.<name>.enabled (ENV).
+ * HumanTimeoutPoller (REMINDER 24ч / EXPIRED 48ч), OutboxPoller (доставка
+ * публикаций успешных результатов — [OutboxDeliveryPoller]). Kill-switch'и:
+ * конфиг scheduler.<name>.enabled (ENV).
  */
 @Singleton(createdAtStart = true)
 class Schedulers(
@@ -53,6 +55,7 @@ class Schedulers(
   private val flowRepository: FlowRepository,
   private val flowStepRepository: FlowStepRepository,
   private val flowService: AgentFlowService,
+  private val outboxPoller: OutboxDeliveryPoller,
   private val proxyNotifier: ProxyNotifier,
   private val metrics: Metrics,
   private val db: org.jep21s.meetupflowagent.db.DatabaseConnectivity,
@@ -63,6 +66,7 @@ class Schedulers(
     startInboxPoller()
     startRetryPoller()
     startHumanTimeoutPoller()
+    startOutboxPoller()
   }
 
   private fun startInboxPoller() {
@@ -211,5 +215,20 @@ class Schedulers(
   } catch (e: Exception) {
     logger.warn(e) { "cannot load active users for notification" }
     emptyList()
+  }
+
+  private fun startOutboxPoller() {
+    scope.launch(Dispatchers.IO) {
+      while (true) {
+        try {
+          if (ConfigLoader.getProperty("scheduler.outbox.enabled", "true").toBoolean()) {
+            outboxPoller.pollOnce()
+          }
+        } catch (e: Exception) {
+          logger.error(e) { "outbox poll cycle failed" }
+        }
+        delay(ConfigLoader.getProperty("scheduler.outbox.intervalSeconds", "5").toLong() * 1000)
+      }
+    }
   }
 }

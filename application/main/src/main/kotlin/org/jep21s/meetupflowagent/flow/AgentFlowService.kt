@@ -78,6 +78,7 @@ class AgentFlowService(
   private val flowRepository: FlowRepository,
   private val flowStepRepository: FlowStepRepository,
   private val eventRepository: EventRepository,
+  private val outboxRepository: org.jep21s.meetupflowagent.db.OutboxRepository,
   private val embeddingClient: EmbeddingClient,
   private val guardrailsService: GuardrailsService,
   private val metrics: Metrics,
@@ -453,9 +454,11 @@ class AgentFlowService(
     }
 
     if (validated.verdict.status == VerdictStatus.APPROVED && validated.startsAtInstant != null) {
-      val eventId = eventRepository.insert(
+      // Событие и публикация outbox — атомарно: успешный результат сразу получает
+      // задания на доставку во все активные назначения (доставит OutboxPoller).
+      val eventId = outboxRepository.insertEventAndEnqueue(
         toEventRow(parsed.dto, parsed.raw, validated, flowId, dedup?.embedding),
-      )
+      ).eventId
       FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.COMPLETED)
       flowRepository.updateStatus(flowId, FlowStatus.COMPLETED.name, verdict = verdictJson(validated.verdict))
       logger.info { "flow completed: flowId=$flowId eventId=$eventId" }

@@ -26,7 +26,9 @@ object ConfigLoader {
     }
 
     fun getProperty(key: String, defaultValue: String = ""): String {
-        val rawValue = properties.getProperty(key, defaultValue)
+        // -Doverride (system property) выше файла: точечная подмена без правки
+        // config.properties — удобно ops и тестам (WireMock-URL в proxy.baseUrl)
+        val rawValue = System.getProperty(key) ?: properties.getProperty(key, defaultValue)
         return resolveEnvironmentVariables(rawValue)
     }
 

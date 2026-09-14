@@ -64,6 +64,31 @@ class Metrics(private val registry: MeterRegistry) {
     registry.counter("meetup_guardrails_verdicts_total", "verdict", verdict).increment()
   }
 
+  /** Исход доставки публикации: sent / retry / failed_permanent / unsupported. */
+  fun outboxDelivery(status: String, destination: String) {
+    registry.counter("meetup_outbox_deliveries_total", "status", status, "destination", destination).increment()
+  }
+
+  fun outboxDeliveryLatency(destination: String, duration: Duration) {
+    Timer.builder("meetup_outbox_delivery_duration_seconds")
+      .tag("destination", destination)
+      .register(registry)
+      .record(duration)
+  }
+
+  /**
+   * Gauge глубины outbox: возвращает AtomicLong, который обновляет OutboxPoller
+   * каждый цикл (suspend-запрос к БД нельзя делать в supplier'е gauge при скрейпе).
+   */
+  fun outboxDepth(): java.util.concurrent.atomic.AtomicLong {
+    val value = java.util.concurrent.atomic.AtomicLong(0)
+    io.micrometer.core.instrument.Gauge
+      .builder("meetup_outbox_depth", value) { it.get().toDouble() }
+      .description("PENDING-доставки, ожидающие отправки")
+      .register(registry)
+    return value
+  }
+
   fun scrape(): String =
     (registry as? PrometheusMeterRegistry)?.scrape()
       ?: "prometheus registry not configured (tests use SimpleMeterRegistry)"
