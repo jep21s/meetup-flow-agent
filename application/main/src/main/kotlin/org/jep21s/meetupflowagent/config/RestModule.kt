@@ -22,6 +22,7 @@ import org.jep21s.meetupflowagent.route.internalMetrics
 import org.jep21s.meetupflowagent.route.internalOutbox
 import org.jep21s.meetupflowagent.route.messages
 import org.jep21s.meetupflowagent.route.ping
+import org.jep21s.meetupflowagent.route.telegramUpdates
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
 import org.jep21s.meetupflowagent.starter.jackson.JacksonConfig
 
@@ -70,6 +71,7 @@ fun Application.restModule() {
       flows()
       flowStream()
       events()
+      telegramUpdates()
     }
   }
 }

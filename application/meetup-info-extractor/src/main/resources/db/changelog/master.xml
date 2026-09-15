@@ -9,5 +9,7 @@
        Exposed лишь маппит таблицы. Идемпотентен: повторный update — no-op. -->
   <include file="01-tables.xml" relativeToChangelogFile="true"/>
   <include file="02-indexes.xml" relativeToChangelogFile="true"/>
+  <!-- файл лежит в модуле application/telegram (общий classpath) -->
+  <include file="03-telegram-questions.xml" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

@@ -6,6 +6,7 @@ import io.ktor.server.engine.embeddedServer
 import org.jep21s.meetupflowagent.config.MainBeanConfig
 import org.jep21s.meetupflowagent.config.restModule
 import org.jep21s.meetupflowagent.extractor.ExtractorBeanConfig
+import org.jep21s.meetupflowagent.telegram.TelegramBeanConfig
 import org.koin.core.annotation.KoinApplication
 import org.koin.plugin.module.dsl.startKoin
 
@@ -13,6 +14,7 @@ import org.koin.plugin.module.dsl.startKoin
   modules = [
     MainBeanConfig::class,
     ExtractorBeanConfig::class,
+    TelegramBeanConfig::class,
   ]
 )
 class Main

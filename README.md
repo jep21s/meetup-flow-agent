@@ -130,20 +130,25 @@ curl -s localhost:8090/internal/metrics | grep meetup_
 UI наблюдаемости: Jaeger `:16686`, Grafana `:3000` (admin/admin, дашборд
 provisioned), Prometheus `:9090`.
 
-## Telegram-прокси (Railway)
+## Telegram-слой (модуль application/telegram) и прокси (Railway)
 
 `telegram-proxy/` — отдельный composite build (Ktor :8082, long polling через
-telegrambots), стоит **на Railway**, а не рядом с агентом. Оба направления:
+telegrambots) на Railway — **«тупая труба» без логики**: пересылает каждый апдейт
+целиком в `POST /api/telegram/updates` агента (RAW `MEETUP_FLOW_TOKEN`) и
+отправляет сообщения по командам `POST /api/send | /api/callback-answer |
+/api/message-keyboard-remove` (Bearer `PROXY_TOKEN`).
 
-- **Вход**: апдейт Telegram → прокси НЕ разбирает содержимое, сериализует всю
-  DTO `Update` в JSON → `POST /api/messages` с `idempotencyKey = "tg-<updateId>"`
-  (дубли глушатся 409); обработку сырого JSON делает агент. Флоу создают только
-  сообщения из заданной группы и топика (`TELEGRAM_SOURCE_CHAT_ID` +
-  `TELEGRAM_SOURCE_TOPIC_ID`, message_thread_id; пустые значения — фильтр
-  выключен, сообщения из прочих чатов игнорируются);
-- **Выход**: `POST /api/notify` → Bot API; HITL-вопрос приходит кнопками
-  (клик/reply на вопрос → `POST /api/flows/{id}/responses`, первый ответ
-  побеждает), первый ответ снимает кнопки у всех адресатов.
+Все решения — в модуле `application/telegram` основного сервиса:
+
+- **Вход**: фильтр источника (`TELEGRAM_SOURCE_CHAT_ID` + `TELEGRAM_SOURCE_TOPIC_ID`,
+  message_thread_id; пустые значения — фильтр выключен, прочие чаты игнорируются);
+  прошедшее фильтр — сырой passthrough в inbox с `idempotencyKey = "tg-<updateId>"`
+  (дубли глушатся) → флоу извлечения;
+- **HITL**: вопрос идёт кнопками (`hitl:<flowId>:<idx>`), заданные вопросы — в
+  таблице `telegram_questions` (Postgres); клик/reply → первый ответ побеждает
+  (`human_requests`), резюм флоу, кнопки снимаются у всех адресатов;
+- **Выход**: адресация уведомлений (userIds → лички, пусто → общий канал
+  `TELEGRAM_MAIN_CHAT_ID`), доставка анонсов через outbox-транспорт telegram_proxy.
 
 Адресация уведомлений агента:
 
@@ -185,7 +190,8 @@ set -a; source .env; set +a                      # реальные ключи:
 
 ```
 application/meetup-info-extractor  # вся логика: agent/ llm/ guardrails/ domain/ flow/ db/ scheduler/ notify/ outbox/ (+ ресурсы: prompts, миграции, schema)
-application/main    # только REST-слой: Main, config (RestModule/TokenAuth/Cors), route/ — зависит от extractor
+application/telegram # telegram-слой: решения по апдейтам, HITL (telegram_questions), адресация исходящих — зависит от extractor
+application/main    # только REST-слой: Main, config (RestModule/TokenAuth/Cors), route/ — зависит от extractor и telegram
 application/test    # все unit/integration-тесты (Testcontainers, фейки)
 application/evals   # оценка качества на golden set (реальная модель)
 application/e2e     # сквозные тесты (реальная модель + реальная БД)

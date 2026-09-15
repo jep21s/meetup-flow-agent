@@ -49,9 +49,14 @@ abstract class PostgresTestBase {
       Events.deleteAll()
       FlowSteps.deleteAll()
       HumanRequests.deleteAll()
-      Flows.deleteAll()
+      // циклическая связь inbox ↔ flows (fk_flows_inbox_message + fk_inbox_messages_flow):
+      // сначала рвём ссылки, иначе deleteAll падает на FK
+      Flows.update { it[inboxMessageId] = null }
+      InboxMessages.update { it[flowId] = null }
       InboxMessages.deleteAll()
+      Flows.deleteAll()
       Users.deleteAll()
+      org.jep21s.meetupflowagent.telegram.db.TelegramQuestions.deleteAll()
       // справочник: оставляем только сеянную миграцией telegram_main и включаем её —
       // тесты добавляют/выключают свои назначения
       Destinations.deleteWhere { Destinations.name neq "telegram_main" }

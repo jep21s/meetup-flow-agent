@@ -4,6 +4,7 @@ set -euo pipefail
 
 ./gradlew \
   :application:meetup-info-extractor:clean \
+  :application:telegram:clean \
   :application:main:clean \
   :application:test:clean \
   :application:evals:clean \
