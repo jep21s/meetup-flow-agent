@@ -8,14 +8,19 @@
 | Пункт | Состояние |
 |---|---|
 | 0. Git-подготовка (коммит `presentation`, ветка `telegram-proxy` от `project`) | ✅ сделано (69de927, ветка от 25acddf) |
-| 0.1 Этот файл плана | ✅ сделано |
-| 1. Изменения в main (HITL → список users) | ⬜ |
-| 2. Composite build `telegram-proxy/` + catalog | ⬜ |
-| 3. Прод-код модуля | ⬜ |
-| 4. Тесты модуля | ⬜ |
-| 5. Wrapper-репозиторий Railway + deploy-скрипт | ⬜ |
-| 6. Документация (AGENTS.md, README, .env.example) | ⬜ |
-| 7. Проверка сборки/тестов/fatJar, финальный коммит | ⬜ |
+| 0.1 Этот файл плана | ✅ сделано (a75380f; kill-switch §6.1 добавлен позже) |
+| 1. Изменения в main (HITL → список users) | ✅ сделано (UsersRepository, waitHuman, Schedulers) |
+| 2. Composite build `telegram-proxy/` + catalog | ✅ сделано (+telegrambots 6.9.7.1) |
+| 3. Прод-код модуля | ✅ сделано (все файлы §4/§5) |
+| 4. Тесты модуля | ✅ 10/10 (NotifyRouteTest 6, IncomingTgMessageHandlerTest 4) |
+| 5. Wrapper-репозиторий Railway + deploy-скрипт | ✅ сделано (`~/projects/my/railway-meetup-tg-proxy`, коммит f301c9f; gh отсутствует — GitHub-пуш вручную) |
+| 6. Документация (AGENTS.md, README, .env.example) | ✅ сделано (+ clean-all.sh) |
+| 7. Проверка сборки/тестов/fatJar, финальный коммит | ✅ build/fatJar/тесты 111+10 зелёные |
+
+Примечание по ходу: в NotifyRouteTest тестовое приложение собирается через
+`Application`-extension (`application { testProxyApp() }`, паттерн FlowRouteTest) —
+регистрация вложенных роутов через хелпер на `ApplicationTestBuilder` в Ktor 3.5
+давала 404 на авторизованные запросы.
 
 ## 1. Цель и роли
 
@@ -204,9 +209,9 @@ Throwable→500), DefaultHeaders, DoubleReceive. Роуты: `GET /` "Hello Worl
 
 ### telegram/MessengerBot.kt
 `class MessengerBot : TelegramLongPollingBot(botToken), TgMessageSender`;
-в `init {}` — `TelegramBotsApi(DefaultBotSession::class.java).registerBot(this)`
-(синглтон `createdAtStart` → long polling стартует с созданием бина; флаг
-`telegram.bot.enabled=false` → вместо него `DummyTgMessageSender`).
+`registerBot` в `init {}` выполняется ТОЛЬКО при `telegram.bot.enabled=true`
+(дефолт false — тесты/локальный запуск бота не поднимают, см. §6.1);
+при выключенном флаге `TgMessageSender` = `DummyTgMessageSender` (только лог).
 `onUpdateReceived` → `UpdateEventRelay.accept(update)`.
 Методы: `sendText(chatId, text): Message?`, `sendQuestion(chatId, text, options): Message?`,
 `answerCallback(callbackQueryId)`, `editQuestionAnswered(chatId, messageId, answer)`.
@@ -255,13 +260,28 @@ applicationCoroutineScope. Порядок обработки апдейта:
 server.port=${PORT:8082}
 telegram.bot.token=${TELEGRAM_BOT_TOKEN:}
 telegram.bot.username=${TELEGRAM_BOT_USERNAME:}
-telegram.bot.enabled=${TELEGRAM_BOT_ENABLED:true}
+# ВЫКЛЮЧАТЕЛЬ БОТА: по умолчанию false — в тестах и при локальном запуске
+# бот НЕ запускается (никаких вызовов Bot API / long polling). На Railway
+# задаётся TELEGRAM_BOT_ENABLED=true.
+telegram.bot.enabled=${TELEGRAM_BOT_ENABLED:false}
 telegram.main.chat-id=${TELEGRAM_MAIN_CHAT_ID:}
 proxy.token=${PROXY_TOKEN:}
 meetup-flow.url=${MEETUP_FLOW_URL:http://localhost:8090}
 meetup-flow.token=${MEETUP_FLOW_TOKEN:change-me-token}
 hitl.pending.ttl-hours=${HITL_PENDING_TTL_HOURS:24}
 ```
+
+### 6.1 Kill-switch бота (`telegram.bot.enabled`)
+
+- **Дефолт `false`**: юнит-тесты и локальный запуск (`./gradlew :telegram-proxy:main:run`)
+  поднимают только Ktor-сервер — `registerBot`/long polling не вызываются ни разу,
+  внешних вызовов Telegram нет. Отправка уведомлений при выключенном боте идёт через
+  `DummyTgMessageSender` (только лог) — `/api/notify` и HITL-логика проверяются без бота.
+- **`true` только на Railway** (`TELEGRAM_BOT_ENABLED=true` в ENV сервиса): бин
+  `MessengerBot` регистрируется в `TelegramBotsApi` (createdAtStart) → long polling.
+- Вкл + пустой `TELEGRAM_BOT_TOKEN` → fail-fast при старте с понятным сообщением.
+- Тесты НЕ переопределяют флаг: дефолтного `false` достаточно, тестовый контекст
+  физически не может уйти в Telegram.
 
 `PROXY_TOKEN` — общий секрет с main (`proxy.token` там же). `TELEGRAM_MAIN_CHAT_ID` —
 chat id канала/группы анонсов (бот должен быть там участником). Railway подставляет

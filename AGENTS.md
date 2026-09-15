@@ -5,7 +5,7 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 ## Архитектура
 
 ```
-<repo>/                        корневой settings.gradle.kts — includeBuild(application), includeBuild(libs)
+<repo>/                        корневой settings.gradle.kts — includeBuild(application), includeBuild(libs), includeBuild(telegram-proxy)
 ├── gradle/libs.versions.toml  единый version catalog (все версии только здесь)
 ├── gradle-plugin/             5 конвеншн-плагинов: build-jvm, build-koin, konvert, build-docker, idea-custom-plugin
 ├── libs/                      стартеры:
@@ -13,8 +13,11 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 │   ├── jackson-starter/       JacksonConfig.customizer — единый ObjectMapper
 │   ├── logging-starter/       logback XML (JSON / logstash encoder)
 │   └── lib-konvert/           requireNotNull() extensions для Konvert
-└── application/
-    └── main/                  Ktor :8090 (CIO), Koin, REST-каркас, fatJar
+├── application/
+│   └── main/                  Ktor :8090 (CIO), Koin, REST-каркас, fatJar
+└── telegram-proxy/            Telegram-прокси на Railway (long polling ↔ REST агента)
+    ├── deploy-railway.sh      fatJar → wrapper-репо railway-meetup-tg-proxy → push
+    └── main/                  Ktor :8082, бот (kill-switch), POST /api/notify, HITL-кнопки
 ```
 
 ## Стек
@@ -40,6 +43,33 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 - `GET /` — "Hello World!" (публичный)
 - `GET /api/ping` — "pong" (заголовок `Authorization: <app.token>`)
 
+## telegram-proxy
+
+Отдельный composite build (`telegram-proxy/`), деплой на Railway из wrapper-репо
+`railway-meetup-tg-proxy` (паттерн railway-tg-application). Связывает бота Telegram
+с агентом, стоит НЕ на одном сервере с application/main:
+
+- **Вход**: апдейт Telegram (long polling) → сериализуется ВСЯ DTO Update в JSON →
+  `POST {MEETUP_FLOW_URL}/api/messages` (`Authorization: <MEETUP_FLOW_TOKEN>` RAW,
+  `idempotencyKey = "tg-<updateId>"`); обработку JSON делает агент
+- **Выход**: `POST /api/notify` от агента (`Authorization: Bearer {PROXY_TOKEN}`) →
+  Bot API: `userIds` непуст → лички (HITL-вопрос с inline-кнопками `hitl:<flowId>:<idx>`),
+  пусто → общий канал `telegram.main.chat-id`; ответ кнопкой/reply →
+  `POST /api/flows/{id}/responses` (`{responderUserId = tg user id, answer}`)
+- **Kill-switch бота**: `telegram.bot.enabled` дефолт **false** — тесты и локальный
+  запуск бота не поднимают (отправка через DummyTgMessageSender); на Railway
+  `TELEGRAM_BOT_ENABLED=true` (+ пустой токен при enabled → fail-fast)
+- Long polling = **один инстанс** на Railway
+
+REST модуля: `GET /`, `GET /ping` (healthcheck, публичный), `POST /api/notify` (Bearer).
+
+ENV модуля — `telegram-proxy/.env.example` (PORT, TELEGRAM_BOT_*, TELEGRAM_MAIN_CHAT_ID,
+PROXY_TOKEN, MEETUP_FLOW_URL/TOKEN, HITL_PENDING_TTL_HOURS); конфиг —
+`telegram-proxy/main/src/main/resources/config.properties`.
+
+Наполнение адресатов HITL — таблица `users` (main): `INSERT INTO users (id, telegram_user_id,
+display_name, role) VALUES (gen_random_uuid(), <tg_id>, '<Имя>', 'member');`
+
 ## Конфигурация
 
 `config.properties` (env-переменные):
@@ -57,6 +87,10 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 ./gradlew :application:main:run         # запуск (:8090)
 ./gradlew :application:main:fatJar      # fat jar (для Docker)
 ./gradlew :application:main:test        # тесты
+./gradlew :telegram-proxy:main:build    # сборка + тесты прокси (бот выключен)
+./gradlew :telegram-proxy:main:run      # запуск прокси (:8082, бот выключен)
+./gradlew :telegram-proxy:main:fatJar   # fat jar прокси
+./telegram-proxy/deploy-railway.sh      # деплой: jar → wrapper-репо → Railway
 ./clean-all.sh                          # clean всех модулей
 ```
 

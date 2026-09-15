@@ -6,6 +6,7 @@ set -euo pipefail
   :application:main:clean \
   :application:test:clean \
   :application:evals:clean \
+  :telegram-proxy:main:clean \
   :libs:jackson-starter:clean \
   :libs:logging-starter:clean \
   :libs:config-starter:clean \

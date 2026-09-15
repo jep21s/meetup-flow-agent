@@ -130,10 +130,49 @@ curl -s localhost:8090/internal/metrics | grep meetup_
 UI наблюдаемости: Jaeger `:16686`, Grafana `:3000` (admin/admin, дашборд
 provisioned), Prometheus `:9090`.
 
+## Telegram-прокси (Railway)
+
+`telegram-proxy/` — отдельный composite build (Ktor :8082, long polling через
+telegrambots), стоит **на Railway**, а не рядом с агентом. Оба направления:
+
+- **Вход**: апдейт Telegram → прокси НЕ разбирает содержимое, сериализует всю
+  DTO `Update` в JSON → `POST /api/messages` с `idempotencyKey = "tg-<updateId>"`
+  (дубли глушатся 409); обработку сырого JSON делает агент;
+- **Выход**: `POST /api/notify` → Bot API; HITL-вопрос приходит кнопками
+  (клик/reply на вопрос → `POST /api/flows/{id}/responses`, первый ответ
+  побеждает), первый ответ снимает кнопки у всех адресатов.
+
+Адресация уведомлений агента:
+
+| Событие | Кому |
+|---|---|
+| `HUMAN_INPUT_REQUIRED` | активные `users` (личные чаты, кнопки) |
+| `REMINDER`, `FLOW_FAILED` | активные `users`; пусто → общий канал |
+| `EVENT_PUBLISHED` | общий канал `TELEGRAM_MAIN_CHAT_ID` |
+
+Список адресатов — таблица `users`, наполняется вручную:
+
+```sql
+INSERT INTO users (id, telegram_user_id, display_name, role)
+VALUES (gen_random_uuid(), <tg_user_id>, '<Имя>', 'member');
+```
+
+**Kill-switch бота**: `TELEGRAM_BOT_ENABLED` по умолчанию `false` — тесты и
+локальный запуск (`./gradlew :telegram-proxy:main:run`) поднимают только
+Ktor-сервер, без long polling и вызовов Bot API; на Railway включается явно
+(пустой токен при включённом флаге — fail-fast на старте).
+
+Деплой: `./telegram-proxy/deploy-railway.sh` собирает fatJar, кладёт в
+wrapper-репо `railway-meetup-tg-proxy` и пушит — Railway пересобирает контейнер
+(long polling ⇒ один инстанс). Связка с агентом — env `PROXY_BASE_URL` /
+`PROXY_TOKEN` (общий секрет с `PROXY_TOKEN` прокси), полный список ENV —
+`telegram-proxy/.env.example`.
+
 ## Тесты и оценка качества
 
 ```bash
 ./gradlew :application:test:test                 # unit + integration (Testcontainers pg+pgvector, ноль внешних вызовов)
+./gradlew :telegram-proxy:main:test              # тесты прокси (бот выключен kill-switch'ом)
 set -a; source .env; set +a                      # реальные ключи:
 ./gradlew :application:evals:eval                # golden-наборы: guardrails TPR/FPR, extraction-точность; отчёт build/reports/evals/report.md
 ./gradlew :application:e2e:e2e                   # сквозные сценарии с реальными LLM
@@ -146,6 +185,7 @@ application/main    # сервис: agent/ llm/ guardrails/ domain/ flow/ db/ sc
 application/test    # все unit/integration-тесты (Testcontainers, фейки)
 application/evals   # оценка качества на golden set (реальная модель)
 application/e2e     # сквозные тесты (реальная модель + реальная БД)
+telegram-proxy/     # Telegram-прокси на Railway: long polling ↔ REST агента (отд. wrapper-репо)
 libs/               # starters: config / jackson / logging (+ build-конвенции)
 infra/              # prometheus/grafana provisioning
 docker-compose.yaml # postgres(pgvector) + jaeger + prometheus + grafana
