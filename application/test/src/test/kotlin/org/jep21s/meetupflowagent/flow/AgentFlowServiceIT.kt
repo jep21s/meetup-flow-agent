@@ -72,6 +72,7 @@ class AgentFlowServiceIT : PostgresTestBase() {
       guardrailsService = passGuardrails,
       metrics = metrics,
       humanRequestRepository = humanRequestRepository,
+      usersRepository = usersRepository,
       proxyNotifier = noopNotifier,
     )
 
@@ -82,6 +83,8 @@ class AgentFlowServiceIT : PostgresTestBase() {
   private val metrics = Metrics.inMemory()
 
   private val humanRequestRepository = org.jep21s.meetupflowagent.db.HumanRequestRepository(testConnectivity())
+
+  private val usersRepository = org.jep21s.meetupflowagent.db.UsersRepository(testConnectivity())
 
   private val noopNotifier = io.mockk.mockk<org.jep21s.meetupflowagent.notify.ProxyNotifier>(relaxed = true)
 
@@ -254,6 +257,7 @@ class AgentFlowServiceIT : PostgresTestBase() {
       guardrailsService = passGuardrails,
       metrics = metrics,
       humanRequestRepository = humanRequestRepository,
+      usersRepository = usersRepository,
       proxyNotifier = noopNotifier,
     )
 

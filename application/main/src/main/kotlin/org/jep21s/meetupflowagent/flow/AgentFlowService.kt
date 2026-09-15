@@ -83,6 +83,7 @@ class AgentFlowService(
   private val guardrailsService: GuardrailsService,
   private val metrics: Metrics,
   private val humanRequestRepository: org.jep21s.meetupflowagent.db.HumanRequestRepository,
+  private val usersRepository: org.jep21s.meetupflowagent.db.UsersRepository,
   private val proxyNotifier: org.jep21s.meetupflowagent.notify.ProxyNotifier,
   private val flowEventBus: FlowEventBus = FlowEventBus(),
   private val tracing: org.jep21s.meetupflowagent.observability.Tracing = org.jep21s.meetupflowagent.observability.Tracing(),
@@ -609,7 +610,7 @@ class AgentFlowService(
       ProxyNotification(
         flowId = flowId,
         event = "HUMAN_INPUT_REQUIRED",
-        userIds = emptyList(),
+        userIds = usersRepository.activeTelegramUserIds(),
         text = e.question.path("question").asText(),
         options = e.question.path("options").mapNotNull { it.takeIf { it.isTextual }?.asText() },
       ),

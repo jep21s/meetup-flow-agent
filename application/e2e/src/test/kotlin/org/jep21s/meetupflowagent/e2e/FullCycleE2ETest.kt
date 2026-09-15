@@ -88,6 +88,7 @@ class FullCycleE2ETest {
     guardrailsService = GuardrailsService(LlmGuardrails(KtorOpenAiLlmClient())),
     metrics = Metrics.inMemory(),
     humanRequestRepository = HumanRequestRepository(db),
+    usersRepository = org.jep21s.meetupflowagent.db.UsersRepository(db),
     proxyNotifier = object : ProxyNotifier {
       override suspend fun notify(notification: ProxyNotification) {
         notifications += notification

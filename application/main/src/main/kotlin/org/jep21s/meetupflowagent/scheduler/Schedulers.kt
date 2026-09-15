@@ -10,16 +10,13 @@ import kotlinx.coroutines.sync.withPermit
 import org.jep21s.meetupflowagent.db.FlowRepository
 import org.jep21s.meetupflowagent.db.FlowStepRepository
 import org.jep21s.meetupflowagent.db.InboxRepository
-import org.jep21s.meetupflowagent.db.Users
+import org.jep21s.meetupflowagent.db.UsersRepository
 import org.jep21s.meetupflowagent.flow.AgentFlowService
 import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.notify.ProxyNotifier
 import org.jep21s.meetupflowagent.observability.Metrics
 import org.jep21s.meetupflowagent.outbox.OutboxDeliveryPoller
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
-import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.koin.core.annotation.Named
 import org.koin.core.annotation.Singleton
 import java.time.Duration
@@ -58,7 +55,7 @@ class Schedulers(
   private val outboxPoller: OutboxDeliveryPoller,
   private val proxyNotifier: ProxyNotifier,
   private val metrics: Metrics,
-  private val db: org.jep21s.meetupflowagent.db.DatabaseConnectivity,
+  private val usersRepository: UsersRepository,
   @Named("applicationCoroutineScope") private val scope: CoroutineScope,
 ) {
 
@@ -133,7 +130,7 @@ class Schedulers(
           ProxyNotification(
             flowId = flowId,
             event = "FLOW_FAILED",
-            userIds = activeUserIds(),
+            userIds = usersRepository.activeTelegramUserIds(),
             text = "Флоу ${flowId} окончательно провален после $maxAttempts попыток: ${flow.lastError?.take(200)}",
           ),
         )
@@ -187,7 +184,7 @@ class Schedulers(
           ProxyNotification(
             flowId = flowId,
             event = "FLOW_FAILED",
-            userIds = activeUserIds(),
+            userIds = usersRepository.activeTelegramUserIds(),
             text = "Ответ человека не получен за ${expireAfter.toHours()}ч — флоу $flowId закрыт (EXPIRED)",
           ),
         )
@@ -199,22 +196,13 @@ class Schedulers(
             ProxyNotification(
               flowId = flowId,
               event = "REMINDER",
-              userIds = activeUserIds(),
+              userIds = usersRepository.activeTelegramUserIds(),
               text = "Ожидается ответ по флоу $flowId (вопрос задан более ${reminderAfter.toHours()}ч назад)",
             ),
           )
         }
       }
     }
-  }
-
-  private fun activeUserIds(): List<Long> = try {
-    transaction(db.database) {
-      Users.selectAll().where { Users.isActive eq true }.map { it[Users.telegramUserId] }
-    }
-  } catch (e: Exception) {
-    logger.warn(e) { "cannot load active users for notification" }
-    emptyList()
   }
 
   private fun startOutboxPoller() {
