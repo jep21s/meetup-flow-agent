@@ -28,6 +28,7 @@ plugins {
 }
 
 rootProject.name = "application"
+include("meetup-info-extractor")
 include("main")
 include("test")
 include("evals")

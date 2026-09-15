@@ -14,7 +14,12 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 │   ├── logging-starter/       logback XML (JSON / logstash encoder)
 │   └── lib-konvert/           requireNotNull() extensions для Konvert
 ├── application/
-│   └── main/                  Ktor :8090 (CIO), Koin, REST-каркас, fatJar
+│   ├── meetup-info-extractor/ # ВСЯ логика: agent/ llm/ guardrails/ domain/ flow/ db/
+│   │                          # scheduler/ notify/ outbox/ resilience/ observability/
+│   │                          # + ресурсы (prompts, db-миграции, schema, context)
+│   │                          # свой Koin-модуль ExtractorBeanConfig
+│   └── main/                  # ТОЛЬКО REST-слой: Main.kt, config/ (RestModule, TokenAuth,
+│                              # Cors, MainBeanConfig-scope), route/; fatJar; :8090
 └── telegram-proxy/            Telegram-прокси на Railway (long polling ↔ REST агента)
     ├── deploy-railway.sh      fatJar → wrapper-репо railway-meetup-tg-proxy → push
     └── main/                  Ktor :8082, бот (kill-switch), POST /api/notify, HITL-кнопки
@@ -33,6 +38,7 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 - Стартеры подключаются GA-координатами без версии: `implementation("org.jep21s.meetupflowagent.libs:config-starter")` (composite substitution)
 - Модули application подключаются через `projects.<name>` (TYPESAFE_PROJECT_ACCESSORS)
 - Koin: `@Module @Configuration @ComponentScan("<пакет>")` на `*BeanConfig`, регистрация в `@KoinApplication` в `Main.kt`
+- Разделение как в messenger-adapter: `application/main` — тонкий REST-слой (endpoint), вся логика — в модуле `application/meetup-info-extractor` (зависимость `projects.meetupInfoExtractor`; каждому модулю, использующему логику, — своя явная зависимость, implementation не транзитивен)
 - Роуты — `fun Route.xxx()` extension в пакете `route/`, подключаются в `RestModule.kt`
 - Jackson — только через `JacksonConfig.customizer` (единый конфиг для server/client/ручной сериализации)
 - Конфиг — `application/main/src/main/resources/config.properties` с `${ENV_VAR:default}`, чтение через `ConfigLoader`

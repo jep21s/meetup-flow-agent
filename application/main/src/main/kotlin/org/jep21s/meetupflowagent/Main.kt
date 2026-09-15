@@ -5,12 +5,14 @@ import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import org.jep21s.meetupflowagent.config.MainBeanConfig
 import org.jep21s.meetupflowagent.config.restModule
+import org.jep21s.meetupflowagent.extractor.ExtractorBeanConfig
 import org.koin.core.annotation.KoinApplication
 import org.koin.plugin.module.dsl.startKoin
 
 @KoinApplication(
   modules = [
     MainBeanConfig::class,
+    ExtractorBeanConfig::class,
   ]
 )
 class Main

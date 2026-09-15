@@ -184,7 +184,8 @@ set -a; source .env; set +a                      # реальные ключи:
 ## Структура
 
 ```
-application/main    # сервис: agent/ llm/ guardrails/ domain/ flow/ db/ scheduler/ notify/ outbox/ observability/ route/
+application/meetup-info-extractor  # вся логика: agent/ llm/ guardrails/ domain/ flow/ db/ scheduler/ notify/ outbox/ (+ ресурсы: prompts, миграции, schema)
+application/main    # только REST-слой: Main, config (RestModule/TokenAuth/Cors), route/ — зависит от extractor
 application/test    # все unit/integration-тесты (Testcontainers, фейки)
 application/evals   # оценка качества на golden set (реальная модель)
 application/e2e     # сквозные тесты (реальная модель + реальная БД)
