@@ -7,8 +7,8 @@ class UnauthorizedException : RuntimeException()
 
 /**
  * Route-scoped token auth: сравнивает заголовок Authorization с ожидаемым
- * значением целиком. Для /api/notify ожидание — `"Bearer ${proxy.token}"`
- * (так шлёт HttpProxyNotifier в meetup-flow-agent).
+ * значением целиком. Для эндпоинтов /api ожидание — `"Bearer ${proxy.token}"`
+ * (так шлёт TelegramProxyClient модуля application/telegram в meetup-flow-agent).
  */
 fun io.ktor.server.routing.Route.requireTokenAuth(expectedHeaderValue: String) {
   install(createRouteScopedPlugin(name = "TokenAuth") {
