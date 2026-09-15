@@ -22,6 +22,20 @@
 регистрация вложенных роутов через хелпер на `ApplicationTestBuilder` в Ktor 3.5
 давала 404 на авторизованные запросы.
 
+## После v1 (изменения поверх плана)
+
+- Прокси стал «тупой трубой»: решения (фильтр источника, HITL, адресация) — в
+  модуле `application/telegram` основного сервиса; `/api/notify` заменён на
+  `/api/send|callback-answer|message-keyboard-remove`, входящие апдейты —
+  `POST /api/telegram/updates`. Контракты §2.2–2.4 ниже — исторические.
+- **Allowlist ответов HITL**: автор клика/reply проверяется по активным `users`
+  (`UsersRepository.isActiveUser`); чужой ответ отклоняется, вопрос остаётся
+  открытым (§2.3 «responderUserId не валидируется» — устарело).
+- **HITL без fallback в общий канал**: пустые `userIds` у
+  `HUMAN_INPUT_REQUIRED` → вопрос не отправляется (error-лог), флоу закроется
+  по `human.timeoutHours`; общий канал — fallback только для
+  `REMINDER`/`FLOW_FAILED` (§2.4 и §11 частично устарели).
+
 ## 1. Цель и роли
 
 `telegram-proxy` — отдельное Kotlin/Ktor-приложение (по образцу `foreign-messenger-application`

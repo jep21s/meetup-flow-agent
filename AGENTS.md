@@ -65,9 +65,10 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 - **Все решения — модуль application/telegram** основного сервиса: фильтр
   источника (`telegram.source.chat-id` + `topic-id`), команды (/start), HITL
   (кнопки `hitl:<flowId>:<idx>` / reply по таблице telegram_questions →
-  `human_requests.submitAnswer` + резюм флоу), passthrough в inbox extractor'а
-  с `idempotencyKey = "tg-<updateId>"`; исходящая адресация (userIds → лички,
-  пусто → общий канал `telegram.main.chat-id`)
+  `human_requests.submitAnswer` + резюм флоу; автор ответа — allowlist по
+  активным users), passthrough в inbox extractor'а с `idempotencyKey =
+  "tg-<updateId>"`; исходящая адресация (userIds → лички; пусто → общий канал
+  `telegram.main.chat-id`, кроме HITL — тем только лички users, без fallback)
 - **Kill-switch бота**: `telegram.bot.enabled` дефолт **false** — тесты и локальный
   запуск бота не поднимают (отправка через DummyTgMessageSender); на Railway
   `TELEGRAM_BOT_ENABLED=true` (+ пустой токен при enabled → fail-fast)

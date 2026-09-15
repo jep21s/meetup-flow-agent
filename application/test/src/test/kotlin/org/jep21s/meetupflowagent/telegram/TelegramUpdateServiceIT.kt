@@ -13,14 +13,20 @@ import org.jep21s.meetupflowagent.db.FlowRepository
 import org.jep21s.meetupflowagent.db.HumanRequestRepository
 import org.jep21s.meetupflowagent.db.InboxMessages
 import org.jep21s.meetupflowagent.db.InboxRepository
+import org.jep21s.meetupflowagent.db.Users
+import org.jep21s.meetupflowagent.db.UsersRepository
 import org.jep21s.meetupflowagent.flow.AgentFlowService
+import org.jep21s.meetupflowagent.notify.EVENT_HUMAN_INPUT_REQUIRED
+import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.starter.jackson.jacksonMapper
 import org.jep21s.meetupflowagent.telegram.db.TelegramQuestionRepository
 import org.jep21s.meetupflowagent.telegram.integration.TelegramProxyClient
 import org.jep21s.meetupflowagent.telegram.integration.TgButton
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.suspendTransaction
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jep21s.meetupflowagent.testsupport.PostgresTestBase
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -30,12 +36,15 @@ import org.telegram.telegrambots.meta.api.objects.Message
 import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.User
 import java.util.UUID
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import kotlin.uuid.toJavaUuid
 
 /**
  * Мозг входящего потока: сырой JSON апдейта → решение. Реальная БД
- * (PostgresTestBase: inbox/flows/human_requests/telegram_questions), прокси и
- * флоу-движок — mockk. Парсинг DTO Update — тот же JSON, что шлёт telegram-proxy.
+ * (PostgresTestBase: inbox/flows/human_requests/telegram_questions/users),
+ * прокси и флоу-движок — mockk. Парсинг DTO Update — тот же JSON, что шлёт
+ * telegram-proxy.
  */
 class TelegramUpdateServiceIT : PostgresTestBase() {
 
@@ -45,6 +54,7 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
   private val inboxRepository = InboxRepository(testConnectivity())
   private val flowRepository = FlowRepository(testConnectivity())
   private val humanRequestRepository = HumanRequestRepository(testConnectivity())
+  private val usersRepository = UsersRepository(testConnectivity())
 
   init {
     // источник passthrough: группа 100, топик 7 (override до конструирования сервиса)
@@ -56,6 +66,7 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
   fun clearSourceFilterOverrides() {
     System.clearProperty("telegram.source.chat-id")
     System.clearProperty("telegram.source.topic-id")
+    System.clearProperty("telegram.main.chat-id")
   }
 
   private fun service() = TelegramUpdateService(
@@ -63,10 +74,41 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
     flowRepository = flowRepository,
     humanRequestRepository = humanRequestRepository,
     questionRepository = questionRepository,
+    usersRepository = usersRepository,
     proxyClient = proxyClient,
     flowService = flowService,
     scope = CoroutineScope(Dispatchers.Unconfined),
   )
+
+  /** Активный пользователь в allowlist users (потенциальный автор HITL-ответа). */
+  @OptIn(ExperimentalUuidApi::class)
+  private fun seedActiveUser(userId: Long) {
+    transaction(database) {
+      Users.insert {
+        it[id] = Uuid.random()
+        it[telegramUserId] = userId
+        it[isActive] = true
+      }
+    }
+  }
+
+  /** JSON апдейта-клика по кнопке вопроса (message 55 в чате 100, idempotent updateId). */
+  private fun callbackUpdateJson(flowId: UUID, fromId: Long, optionIndex: Int): String {
+    val update = Update().apply {
+      updateId = 20
+      callbackQuery = CallbackQuery().apply {
+        id = "cb-1"
+        data = "hitl:$flowId:$optionIndex"
+        from = User().apply { id = fromId; userName = "кликнувший" }
+        message = Message().apply {
+          messageId = 55
+          date = 1_700_000_000 // реальный callback всегда с date — без него message десериализуется как недоступный
+          chat = Chat().apply { id = 100L; type = "private" }
+        }
+      }
+    }
+    return jacksonMapper.writeValueAsString(update)
+  }
 
   private fun textUpdateJson(
     updateId: Int,
@@ -167,26 +209,11 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
     questionRepository.register(flowId, 200L, 66L, listOf("да", "нет"))
     coEvery { proxyClient.answerCallback(any(), any()) } returns Unit
     coEvery { proxyClient.removeKeyboard(any(), any()) } returns Unit
+    seedActiveUser(9L)
 
-    val question = Message().apply {
-      messageId = 55
-      date = 1_700_000_000 // реальный callback всегда с date — без него message десериализуется как недоступный
-      chat = Chat().apply { id = 100L; type = "private" }
-    }
-    val update = Update().apply {
-      updateId = 20
-      callbackQuery = CallbackQuery().apply {
-        id = "cb-1"
-        data = "hitl:$flowId:1"
-        from = User().apply { id = 9L; userName = "anna" }
-        message = question
-      }
-    }
-    val json = jacksonMapper.writeValueAsString(update)
-    println("DEBUGJSON $json")
+    val json = callbackUpdateJson(flowId, fromId = 9L, optionIndex = 1)
     // roundtrip: main обязан распарсить JSON прокси, включая message callback'а
-    val parsed = jacksonMapper.readValue(json, Update::class.java)
-    assertThat(parsed.callbackQuery?.message).isInstanceOf(Message::class.java)
+    assertThat(jacksonMapper.readValue(json, Update::class.java).callbackQuery?.message).isInstanceOf(Message::class.java)
 
     val svc = service()
 
@@ -203,10 +230,28 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
   }
 
   @Test
+  fun `callback from user outside allowlist rejected - question stays asked`() = runTest {
+    val flowId = flowRepository.create("WAITING_HUMAN")
+    humanRequestRepository.create(flowId, jacksonMapper.readTree("{\"question\":\"Идём?\",\"options\":[\"да\",\"нет\"]}"))
+    questionRepository.register(flowId, 100L, 55L, listOf("да", "нет"))
+    coEvery { proxyClient.answerCallback(any(), any()) } returns Unit
+    // пользователя 9 в allowlist users нет
+
+    service().handle(callbackUpdateJson(flowId, fromId = 9L, optionIndex = 1))
+
+    coVerify(exactly = 0) { flowService.resume(any(), any()) }
+    // вопрос не закрыт и кнопки не сняты — адресаты всё ещё могут ответить
+    assertThat(questionRepository.findAsked(100L, 55L)).isNotNull
+    coVerify(exactly = 0) { proxyClient.removeKeyboard(any(), any()) }
+    coVerify { proxyClient.answerCallback("cb-1", "⛔ Не авторизован") }
+  }
+
+  @Test
   fun `reply to asked question submits free-text answer`() = runTest {
     val flowId = flowRepository.create("WAITING_HUMAN")
     humanRequestRepository.create(flowId, jacksonMapper.readTree("{\"question\":\"Идём?\",\"options\":[\"да\",\"нет\"]}"))
     questionRepository.register(flowId, 100L, 55L, listOf("да", "нет"))
+    seedActiveUser(7L) // from.id текстового апдейта
 
     val svc = service()
 
@@ -214,6 +259,20 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
 
     coVerify { flowService.resume(flowId, "давай в среду") }
     assertThat(questionRepository.findAsked(100L, 55L)).isNull()
+  }
+
+  @Test
+  fun `reply from user outside allowlist rejected - question stays asked`() = runTest {
+    val flowId = flowRepository.create("WAITING_HUMAN")
+    humanRequestRepository.create(flowId, jacksonMapper.readTree("{\"question\":\"Идём?\",\"options\":[\"да\",\"нет\"]}"))
+    questionRepository.register(flowId, 100L, 55L, listOf("да", "нет"))
+    // from.id=7 в allowlist users не сеем
+
+    service().handle(textUpdateJson(updateId = 22, text = "посторонний совет", threadId = null, replyToMessageId = 55))
+
+    coVerify(exactly = 0) { flowService.resume(any(), any()) }
+    assertThat(questionRepository.findAsked(100L, 55L)).isNotNull
+    coVerify { proxyClient.sendText(100L, match { it.contains("Не авторизован") }) }
   }
 
   @Test
@@ -225,9 +284,9 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
     val notifier = TelegramNotifier(proxyClient, questionRepository)
 
     notifier.notify(
-      org.jep21s.meetupflowagent.notify.ProxyNotification(
+      ProxyNotification(
         flowId = UUID.randomUUID(),
-        event = "HUMAN_INPUT_REQUIRED",
+        event = EVENT_HUMAN_INPUT_REQUIRED,
         userIds = listOf(11L),
         text = "Какую дату?",
         options = listOf("пятница", "суббота"),
@@ -240,5 +299,41 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
     val asked = questionRepository.findAsked(11L, 77L)
     assertThat(asked).isNotNull
     assertThat(asked!!.options).containsExactly("пятница", "суббота")
+  }
+
+  @Test
+  fun `hitl without trusted recipients is not sent to main chat`() = runTest {
+    System.setProperty("telegram.main.chat-id", "300")
+    coEvery { proxyClient.configured } returns true
+
+    TelegramNotifier(proxyClient, questionRepository).notify(
+      ProxyNotification(
+        flowId = UUID.randomUUID(),
+        event = EVENT_HUMAN_INPUT_REQUIRED,
+        userIds = emptyList(),
+        text = "Идём?",
+        options = listOf("да", "нет"),
+      )
+    )
+
+    coVerify(exactly = 0) { proxyClient.sendQuestion(any(), any(), any()) }
+    coVerify(exactly = 0) { proxyClient.sendText(any(), any()) }
+  }
+
+  @Test
+  fun `system event with empty userIds still falls back to main chat`() = runTest {
+    System.setProperty("telegram.main.chat-id", "300")
+    coEvery { proxyClient.configured } returns true
+
+    TelegramNotifier(proxyClient, questionRepository).notify(
+      ProxyNotification(
+        flowId = UUID.randomUUID(),
+        event = "FLOW_FAILED",
+        userIds = emptyList(),
+        text = "флоу провален",
+      )
+    )
+
+    coVerify { proxyClient.sendText(300L, "флоу провален") }
   }
 }

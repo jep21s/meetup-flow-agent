@@ -6,6 +6,7 @@ import kotlinx.coroutines.launch
 import org.jep21s.meetupflowagent.db.FlowRepository
 import org.jep21s.meetupflowagent.db.HumanRequestRepository
 import org.jep21s.meetupflowagent.db.InboxRepository
+import org.jep21s.meetupflowagent.db.UsersRepository
 import org.jep21s.meetupflowagent.flow.AgentFlowService
 import org.jep21s.meetupflowagent.flow.FlowStatus
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
@@ -30,6 +31,7 @@ private const val CALLBACK_PREFIX = "hitl:"
  * 1. callbackQuery "hitl:<flowId>:<idx>" — клик по кнопке HITL-вопроса →
  *    ответ опцией в human_requests + резюм флоу (первый побеждает);
  * 2. reply на заданный вопрос (telegram_questions) — свободный текст как ответ;
+ *    автор ответа (оба пути) проходит allowlist — активные `users`;
  * 3. команды `/...` — локальные (приветствие /start), агенту не идут;
  * 4. message/channelPost из источника (telegram.source.chat-id + topic-id) —
  *    сырой passthrough: ВСЯ DTO Update как text в inbox (idempotencyKey
@@ -42,6 +44,7 @@ class TelegramUpdateService(
   private val flowRepository: FlowRepository,
   private val humanRequestRepository: HumanRequestRepository,
   private val questionRepository: TelegramQuestionRepository,
+  private val usersRepository: UsersRepository,
   private val proxyClient: TelegramProxyClient,
   private val flowService: AgentFlowService,
   @Named("applicationCoroutineScope") private val scope: CoroutineScope,
@@ -155,6 +158,8 @@ class TelegramUpdateService(
   /**
    * Ответ человека: первый побеждает (human_requests.submitAnswer); резюм флоу —
    * в фоне на applicationCoroutineScope (цикл с LLM может быть долгим).
+   * Автор проходит allowlist (активные users): чужой ответ отклоняется,
+   * вопрос остаётся открытым — адресаты всё ещё могут ответить.
    * После ответа вопрос закрывается у всех адресатов (кнопки снимаются).
    */
   private suspend fun submitAnswer(
@@ -165,6 +170,15 @@ class TelegramUpdateService(
     questionMessageId: Long,
     callbackQueryId: String?,
   ) {
+    if (!usersRepository.isActiveUser(responderUserId)) {
+      logger.warn { "hitl answer rejected — responder not in active users: flowId=$flowId userId=$responderUserId" }
+      if (callbackQueryId != null) {
+        proxyClient.answerCallback(callbackQueryId, "⛔ Не авторизован")
+      } else {
+        proxyClient.sendText(chatId, "⛔ Не авторизован: ответ не принят")
+      }
+      return
+    }
     val won = humanRequestRepository.submitAnswer(flowId, responderUserId, answer)
     if (won) {
       scope.launch {

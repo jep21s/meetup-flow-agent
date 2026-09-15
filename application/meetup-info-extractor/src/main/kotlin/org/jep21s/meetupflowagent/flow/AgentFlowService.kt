@@ -32,6 +32,7 @@ import org.jep21s.meetupflowagent.llm.EmbeddingClient
 import org.jep21s.meetupflowagent.llm.EmbeddingException
 import org.jep21s.meetupflowagent.llm.LlmClient
 import org.jep21s.meetupflowagent.llm.LlmException
+import org.jep21s.meetupflowagent.notify.EVENT_HUMAN_INPUT_REQUIRED
 import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.scheduler.RetrySchedule
 import org.jep21s.meetupflowagent.llm.StreamDelta
@@ -609,7 +610,7 @@ class AgentFlowService(
     proxyNotifier.notify(
       ProxyNotification(
         flowId = flowId,
-        event = "HUMAN_INPUT_REQUIRED",
+        event = EVENT_HUMAN_INPUT_REQUIRED,
         userIds = usersRepository.activeTelegramUserIds(),
         text = e.question.path("question").asText(),
         options = e.question.path("options").mapNotNull { it.takeIf { it.isTextual }?.asText() },

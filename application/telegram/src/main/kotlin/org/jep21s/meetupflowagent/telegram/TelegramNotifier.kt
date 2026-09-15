@@ -1,6 +1,7 @@
 package org.jep21s.meetupflowagent.telegram
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.jep21s.meetupflowagent.notify.EVENT_HUMAN_INPUT_REQUIRED
 import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.notify.ProxyNotifier
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
@@ -13,13 +14,17 @@ private val logger = KotlinLogging.logger { }
 
 /**
  * Исходящие уведомления агента → Telegram через прокси. Вся адресация здесь
- * (раньше решал telegram-proxy в /api/notify): userIds непуст → личные чаты,
- * пусто → общий канал (telegram.main.chat-id). HUMAN_INPUT_REQUIRED идёт с
- * кнопками (callback_data "hitl:<flowId>:<index>") и регистрируется в
+ * (раньше решал telegram-proxy в /api/notify): userIds непуст → личные чаты.
+ * HITL-вопросы ([EVENT_HUMAN_INPUT_REQUIRED]) — только в личные чаты активных
+ * users: пустой список НЕ подменяется общим каналом (ответы всё равно прошли бы
+ * allowlist users) — вопрос не отправляется, флоу закроется по
+ * human.timeoutHours (EXPIRED). Системные события при пустом списке идут в
+ * общий канал (telegram.main.chat-id). HUMAN_INPUT_REQUIRED идёт с кнопками
+ * (callback_data "hitl:<flowId>:<index>") и регистрируется в
  * telegram_questions для ответов reply-ом и снятия кнопок.
  *
- * Fire-and-forget, как прежний HttpProxyNotifier: сбой доставки логируется,
- * но не ломает флоу (для публикаций есть outbox с ретраями — TelegramOutboxTransport).
+ * Fire-and-forget: сбой доставки логируется, но не ломает флоу (для публикаций
+ * есть outbox с ретраями — TelegramOutboxTransport).
  */
 @Singleton(binds = [ProxyNotifier::class])
 class TelegramNotifier(
@@ -34,13 +39,23 @@ class TelegramNotifier(
       logger.debug { "proxy.baseUrl empty — notification skipped: ${notification.event} flowId=${notification.flowId}" }
       return
     }
-    val targets = notification.userIds.ifEmpty { mainChatId?.let { listOf(it) } ?: emptyList() }
+    val targets = when {
+      notification.userIds.isNotEmpty() -> notification.userIds
+      notification.event == EVENT_HUMAN_INPUT_REQUIRED -> {
+        logger.error {
+          "hitl has no trusted recipients (users empty) — not asked, flow will expire by timeout: " +
+            "flowId=${notification.flowId}"
+        }
+        return
+      }
+      else -> mainChatId?.let { listOf(it) } ?: emptyList()
+    }
     if (targets.isEmpty()) {
       logger.warn { "no target chats for notification: event=${notification.event} flowId=${notification.flowId}" }
       return
     }
 
-    val withButtons = notification.event == "HUMAN_INPUT_REQUIRED" && notification.options.isNotEmpty()
+    val withButtons = notification.event == EVENT_HUMAN_INPUT_REQUIRED && notification.options.isNotEmpty()
     var sent = 0
     targets.forEach { chatId ->
       val messageId = if (withButtons) {

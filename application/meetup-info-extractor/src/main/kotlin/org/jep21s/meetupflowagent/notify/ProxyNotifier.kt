@@ -2,6 +2,9 @@ package org.jep21s.meetupflowagent.notify
 
 import java.util.UUID
 
+/** Событие HITL-вопроса: единственное с options; доставляется только в личные чаты активных users. */
+const val EVENT_HUMAN_INPUT_REQUIRED = "HUMAN_INPUT_REQUIRED"
+
 /** Уведомление telegram-слою (§11): событие флоу + текст + адресаты. */
 data class ProxyNotification(
   val flowId: UUID,

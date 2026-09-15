@@ -3,6 +3,7 @@ package org.jep21s.meetupflowagent.db
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.suspendTransaction
@@ -31,5 +32,23 @@ class UsersRepository(private val db: DatabaseConnectivity) {
   } catch (e: Exception) {
     logger.warn(e) { "cannot load active users for notification" }
     emptyList()
+  }
+
+  /**
+   * Есть ли telegram-id в активном списке `users` — allowlist для ответов на
+   * HITL-вопросы. При сбое БД честнее не пустить постороннего: false.
+   */
+  suspend fun isActiveUser(telegramUserId: Long): Boolean = try {
+    withContext(Dispatchers.IO) {
+      suspendTransaction(db.database) {
+        Users.selectAll()
+          .where { (Users.telegramUserId eq telegramUserId) and (Users.isActive eq true) }
+          .limit(1)
+          .any()
+      }
+    }
+  } catch (e: Exception) {
+    logger.warn(e) { "cannot check user allowlist: userId=$telegramUserId" }
+    false
   }
 }
