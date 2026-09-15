@@ -41,15 +41,26 @@ class IncomingTgMessageHandlerTest {
     userName = username
   }
 
-  private fun textUpdate(updateId: Int, text: String, replyTo: Message? = null, from: User = user()): Update =
+  private fun textUpdate(
+    updateId: Int,
+    text: String,
+    replyTo: Message? = null,
+    from: User = user(),
+    chatId: Long = 100L,
+    threadId: Int? = null,
+  ): Update =
     Update().apply {
       this.updateId = updateId
       message = Message().apply {
-        chat = this@IncomingTgMessageHandlerTest.chat()
+        chat = Chat().apply {
+          id = chatId
+          type = "private"
+        }
         this.from = from
         this.text = text
         date = 1_700_000_000
         replyToMessage = replyTo
+        threadId?.let { messageThreadId = it }
       }
     }
 
@@ -117,5 +128,48 @@ class IncomingTgMessageHandlerTest {
 
     coVerify(exactly = 0) { agent.postMessage(any(), any(), any()) }
     coVerify { sender.sendText(100L, match { it.contains("Привет") }) }
+  }
+
+  // фильтр источника: handler читает telegram.source.* при создании, поэтому
+  // override задаётся ДО конструирования локального handler'а (ConfigLoader
+  // проверяет System.getProperty первым — штатный механизм для тестов/ops)
+  @org.junit.jupiter.api.AfterEach
+  fun clearSourceFilterOverrides() {
+    System.clearProperty("telegram.source.chat-id")
+    System.clearProperty("telegram.source.topic-id")
+  }
+
+  @Test
+  fun `source filter - message from configured chat and topic is forwarded`() = runTest {
+    System.setProperty("telegram.source.chat-id", "100")
+    System.setProperty("telegram.source.topic-id", "7")
+    coEvery { agent.postMessage(any(), any(), any()) } returns AgentCallResult.Accepted
+    val filtered = IncomingTgMessageHandler(agent, sender, pendingStore, CoroutineScope(Dispatchers.Unconfined))
+
+    filtered.handle(textUpdate(updateId = 50, text = "митап", chatId = 100L, threadId = 7))
+
+    coVerify(exactly = 1) { agent.postMessage(any(), any(), any()) }
+  }
+
+  @Test
+  fun `source filter - message from another chat is ignored`() = runTest {
+    System.setProperty("telegram.source.chat-id", "100")
+    System.setProperty("telegram.source.topic-id", "7")
+    val filtered = IncomingTgMessageHandler(agent, sender, pendingStore, CoroutineScope(Dispatchers.Unconfined))
+
+    filtered.handle(textUpdate(updateId = 51, text = "спам из другого чата", chatId = 555L, threadId = 7))
+
+    coVerify(exactly = 0) { agent.postMessage(any(), any(), any()) }
+  }
+
+  @Test
+  fun `source filter - message from another topic of same chat is ignored`() = runTest {
+    System.setProperty("telegram.source.chat-id", "100")
+    System.setProperty("telegram.source.topic-id", "7")
+    val filtered = IncomingTgMessageHandler(agent, sender, pendingStore, CoroutineScope(Dispatchers.Unconfined))
+
+    filtered.handle(textUpdate(updateId = 52, text = "не тот топик", chatId = 100L, threadId = 9))
+
+    coVerify(exactly = 0) { agent.postMessage(any(), any(), any()) }
   }
 }

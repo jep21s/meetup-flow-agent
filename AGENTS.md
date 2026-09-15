@@ -51,7 +51,10 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 
 - **Вход**: апдейт Telegram (long polling) → сериализуется ВСЯ DTO Update в JSON →
   `POST {MEETUP_FLOW_URL}/api/messages` (`Authorization: <MEETUP_FLOW_TOKEN>` RAW,
-  `idempotencyKey = "tg-<updateId>"`); обработку JSON делает агент
+  `idempotencyKey = "tg-<updateId>"`); обработку JSON делает агент;
+  флоу создают ТОЛЬКО сообщения из источника `telegram.source.chat-id` +
+  `telegram.source.topic-id` (форум-топик, message_thread_id; пустые значения —
+  фильтр выключен, прочие чаты игнорируются info-логом)
 - **Выход**: `POST /api/notify` от агента (`Authorization: Bearer {PROXY_TOKEN}`) →
   Bot API: `userIds` непуст → лички (HITL-вопрос с inline-кнопками `hitl:<flowId>:<idx>`),
   пусто → общий канал `telegram.main.chat-id`; ответ кнопкой/reply →

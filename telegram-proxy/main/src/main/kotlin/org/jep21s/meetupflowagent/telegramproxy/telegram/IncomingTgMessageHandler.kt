@@ -3,6 +3,7 @@ package org.jep21s.meetupflowagent.telegramproxy.telegram
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import org.jep21s.meetupflowagent.starter.config.ConfigLoader
 import org.jep21s.meetupflowagent.starter.jackson.jacksonMapper
 import org.jep21s.meetupflowagent.telegramproxy.integration.AgentCallResult
 import org.jep21s.meetupflowagent.telegramproxy.integration.MeetupFlowAgent
@@ -34,6 +35,15 @@ class IncomingTgMessageHandler(
   private val pendingStore: HitlPendingStore,
   @Named("applicationCoroutineScope") private val scope: CoroutineScope,
 ) {
+
+  /**
+   * Источник сырого passthrough: только эта группа (telegram.source.chat-id)
+   * и этот топик форум-группы (telegram.source.topic-id, message_thread_id;
+   * General = 1). Любое из значений не задано → по нему ограничений нет;
+   * оба пустые → фильтр выключен, проходят сообщения из любого чата.
+   */
+  private val sourceChatId = ConfigLoader.getProperty("telegram.source.chat-id").trim().toLongOrNull()
+  private val sourceTopicId = ConfigLoader.getProperty("telegram.source.topic-id").trim().toLongOrNull()
 
   init {
     scope.launch {
@@ -89,7 +99,16 @@ class IncomingTgMessageHandler(
       }
     }
 
-    // сырой passthrough: прокси НЕ разбирает содержимое — всю DTO Update как text
+    // сырой passthrough: прокси НЕ разбирает содержимое — всю DTO Update как text.
+    // Пропускаем только сообщения из заданной группы/топика: прочие чаты
+    // (лички, сторонние группы) флоу извлечения не создают.
+    if (!isFromSourceChatTopic(message)) {
+      logger.info {
+        "message outside source chat/topic — ignored: updateId=${update.updateId} " +
+          "chatId=$chatId threadId=${message.messageThreadId}"
+      }
+      return
+    }
     val result = agentClient.postMessage(
       idempotencyKey = "tg-${update.updateId}",
       text = jacksonMapper.writeValueAsString(update),
@@ -100,6 +119,13 @@ class IncomingTgMessageHandler(
         logger.warn { "passthrough failed: updateId=${update.updateId} chatId=$chatId" }
       else -> logger.debug { "passthrough done: updateId=${update.updateId} result=$result" }
     }
+  }
+
+  /** Сообщение из заданного источника (группа/топик); незаданное ограничение не проверяется. */
+  internal fun isFromSourceChatTopic(message: Message): Boolean {
+    val chatOk = sourceChatId == null || message.chat?.id == sourceChatId
+    val topicOk = sourceTopicId == null || message.messageThreadId?.toLong() == sourceTopicId
+    return chatOk && topicOk
   }
 
   private suspend fun handleCommand(chatId: Long, text: String) {
