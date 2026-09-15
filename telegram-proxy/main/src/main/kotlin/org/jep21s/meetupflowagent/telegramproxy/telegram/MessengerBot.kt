@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import org.telegram.telegrambots.bots.TelegramLongPollingBot
 import org.telegram.telegrambots.meta.TelegramBotsApi
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup
 import org.telegram.telegrambots.meta.api.objects.Message
 import org.telegram.telegrambots.meta.api.objects.Update
@@ -11,15 +12,15 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession
-import java.util.UUID
 
 private val logger = KotlinLogging.logger { }
 
 /**
- * Long-polling бот (registerBot в init — синглтон Koin создаётся при старте;
- * telegram.bot.enabled=false → этот класс вообще не инстанцируется, см.
- * TelegramProxyBeanConfig). Plain text без parse mode: анонсы с URL/эмодзи
- * не должны ломаться о Markdown.
+ * Long-polling бот «тупой трубы»: получает апдейты → [UpdateEventRelay] →
+ * [UpdateForwarder] (в основной сервис); отправляет то, что скажет основной
+ * сервис через /api/send. Никаких решений здесь. registerBot в init —
+ * синглтон Koin создаётся при старте; telegram.bot.enabled=false → класс
+ * вообще не инстанцируется (TelegramProxyBeanConfig). Plain text без parse mode.
  */
 class MessengerBot(
   private val botToken: String,
@@ -42,14 +43,9 @@ class MessengerBot(
   override suspend fun sendText(chatId: Long, text: String): SentTgMessage? =
     executeSend(chatId, text, null)
 
-  override suspend fun sendQuestion(chatId: Long, flowId: UUID, text: String, options: List<String>): SentTgMessage? {
-    // одна опция = одна строка кнопок; callback_data "hitl:<uuid>:<idx>" ≤ 44 байт < 64
+  override suspend fun sendButtons(chatId: Long, text: String, buttons: List<SendButton>): SentTgMessage? {
     val keyboard = InlineKeyboardMarkup().apply {
-      keyboard = options.mapIndexed { idx, option ->
-        listOf(
-          InlineKeyboardButton(option).apply { callbackData = "hitl:$flowId:$idx" }
-        )
-      }
+      keyboard = buttons.map { listOf(InlineKeyboardButton(it.text).apply { callbackData = it.callbackData }) }
     }
     return executeSend(chatId, text, keyboard)
   }
@@ -67,7 +63,7 @@ class MessengerBot(
     }
   }
 
-  override suspend fun editQuestionAnswered(chatId: Long, messageId: Long) {
+  override suspend fun removeKeyboard(chatId: Long, messageId: Long) {
     try {
       execute(
         EditMessageReplyMarkup().apply {
@@ -76,17 +72,13 @@ class MessengerBot(
         }
       )
     } catch (e: Exception) {
-      logger.warn(e) { "editQuestionAnswered failed: chatId=$chatId messageId=$messageId" }
+      logger.warn(e) { "removeKeyboard failed: chatId=$chatId messageId=$messageId" }
     }
   }
 
   private suspend fun executeSend(chatId: Long, text: String, keyboard: InlineKeyboardMarkup?): SentTgMessage? =
     try {
-      val message: Message = execute(
-        org.telegram.telegrambots.meta.api.methods.send.SendMessage(chatId.toString(), text).apply {
-          replyMarkup = keyboard
-        }
-      )
+      val message: Message = execute(SendMessage(chatId.toString(), text).apply { replyMarkup = keyboard })
       logger.debug { "sent to chat $chatId: messageId=${message.messageId}" }
       SentTgMessage(chatId, message.messageId.toLong())
     } catch (e: TelegramApiException) {

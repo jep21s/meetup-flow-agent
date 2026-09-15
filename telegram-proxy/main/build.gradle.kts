@@ -35,6 +35,7 @@ dependencies {
   testImplementation(libs.mockk)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.test.ktor.server.host)
+  testImplementation(libs.test.ktor.client.mock)
 }
 
 tasks.register<Jar>("fatJar") {

@@ -7,8 +7,7 @@ private val logger = KotlinLogging.logger { }
 
 /**
  * Заглушка вместо бота: тесты и локальный запуск при telegram.bot.enabled=false
- * (kill-switch §6.1 плана). Ничего не отправляет, «доставку» засчитывает —
- * /api/notify отвечает 202, локально можно гонять весь флоу без Telegram.
+ * (kill-switch). Ничего не отправляет, «доставку» засчитывает.
  */
 class DummyTgMessageSender : TgMessageSender {
 
@@ -17,13 +16,8 @@ class DummyTgMessageSender : TgMessageSender {
     return SentTgMessage(chatId, -1)
   }
 
-  override suspend fun sendQuestion(
-    chatId: Long,
-    flowId: UUID,
-    text: String,
-    options: List<String>,
-  ): SentTgMessage {
-    logger.warn { "telegram bot disabled, skipping sendQuestion to chat $chatId: flowId=$flowId options=$options" }
+  override suspend fun sendButtons(chatId: Long, text: String, buttons: List<SendButton>): SentTgMessage {
+    logger.warn { "telegram bot disabled, skipping sendButtons to chat $chatId: buttons=${buttons.size}" }
     return SentTgMessage(chatId, -1)
   }
 
@@ -31,7 +25,7 @@ class DummyTgMessageSender : TgMessageSender {
     logger.warn { "telegram bot disabled, skipping answerCallback: $callbackQueryId" }
   }
 
-  override suspend fun editQuestionAnswered(chatId: Long, messageId: Long) {
-    logger.warn { "telegram bot disabled, skipping editQuestionAnswered: chatId=$chatId messageId=$messageId" }
+  override suspend fun removeKeyboard(chatId: Long, messageId: Long) {
+    logger.warn { "telegram bot disabled, skipping removeKeyboard: chatId=$chatId messageId=$messageId" }
   }
 }

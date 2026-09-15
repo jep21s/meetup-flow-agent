@@ -16,13 +16,13 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import org.jep21s.meetupflowagent.starter.config.ConfigLoader
 import org.jep21s.meetupflowagent.starter.jackson.JacksonConfig
-import org.jep21s.meetupflowagent.telegramproxy.telegram.HitlPendingStore
+import org.jep21s.meetupflowagent.telegramproxy.route.send
 import org.jep21s.meetupflowagent.telegramproxy.telegram.TgMessageSender
-import org.jep21s.meetupflowagent.telegramproxy.route.notify
 import org.koin.mp.KoinPlatform
 
 private val logger = KotlinLogging.logger { }
 
+/** Прокси «тупая труба»: принимает /api/send от основного сервиса, всё остальное — форвардер. */
 fun Application.restModule() {
   install(ContentNegotiation) {
     jackson {
@@ -37,26 +37,19 @@ fun Application.restModule() {
       logger.error(ex) { ex.message }
       call.respond(
         HttpStatusCode.InternalServerError,
-        mapOf(
-          "status" to HttpStatusCode.InternalServerError.value
-        )
+        mapOf("status" to HttpStatusCode.InternalServerError.value)
       )
     }
   }
   install(DefaultHeaders)
 
-  // вызывают HttpProxyNotifier/TelegramProxyTransport из meetup-flow-agent:
-  // Authorization: Bearer {proxy.token}
+  // вызывает модуль application/telegram основного сервиса: Bearer {proxy.token}
   val proxyToken = ConfigLoader.getRequiredProperty(
     "proxy.token",
     "Proxy token is not configured. Please set proxy.token in config.properties or PROXY_TOKEN environment variable"
   )
 
-  // общий канал анонсов — fallback, когда userIds пуст (0/null = не задан)
-  val mainChatId = ConfigLoader.getProperty("telegram.main.chat-id").trim().toLongOrNull()
-
   val sender = KoinPlatform.getKoin().get<TgMessageSender>()
-  val pendingStore = KoinPlatform.getKoin().get<HitlPendingStore>()
 
   routing {
     get("/") {
@@ -68,7 +61,7 @@ fun Application.restModule() {
     }
     route("/api") {
       requireTokenAuth("Bearer $proxyToken")
-      notify(sender, pendingStore, mainChatId)
+      send(sender)
     }
   }
 }
