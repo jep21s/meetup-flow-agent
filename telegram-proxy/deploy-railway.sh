@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Деплой telegram-proxy на Railway: собрать fatJar → скопировать в wrapper-репо
-# (railway-meetup-tg-proxy) → commit + push. Railway пересобирает контейнер по push.
+# (railway-meetup-flow-tg) → commit + push. Railway пересобирает контейнер по push.
 # Wrapper-репо живёт ОТДЕЛЬНО от этого проекта (паттерн railway-tg-application).
 set -euo pipefail
 
-RAILWAY_DIR="${RAILWAY_DIR:-$HOME/projects/my/railway-meetup-tg-proxy}"
+RAILWAY_DIR="${RAILWAY_DIR:-$HOME/projects/my/railway-meetup-flow-tg}"
 
 if [ ! -d "$RAILWAY_DIR/.git" ]; then
   echo "wrapper-repo not found: $RAILWAY_DIR (clone/create it first)" >&2
@@ -14,7 +14,7 @@ fi
 cd "$(dirname "$0")/.."
 ./gradlew :telegram-proxy:main:fatJar
 
-# свежий *-all.jar (версия из git-тега; без тегов — 1.0-SNAPSHOT)
+# свежий *-all.jar (ветка ≠ main → <ветка>-<hash8>[-dirty]; main+тег → X.Y.Z)
 JAR="$(ls -t telegram-proxy/main/build/libs/*-all.jar | head -1)"
 cp "$JAR" "$RAILWAY_DIR/"
 
