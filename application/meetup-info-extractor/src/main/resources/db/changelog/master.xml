@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+  <!-- Полный DDL схемы (§6 COMMON_PLAN.md): DDL создаётся только Liquibase,
+       Exposed лишь маппит таблицы. Идемпотентен: повторный update — no-op. -->
+  <include file="01-tables.xml" relativeToChangelogFile="true"/>
+  <include file="02-indexes.xml" relativeToChangelogFile="true"/>
+  <!-- файл лежит в модуле application/telegram (общий classpath) -->
+  <include file="03-telegram-questions.xml" relativeToChangelogFile="true"/>
+
+</databaseChangeLog>

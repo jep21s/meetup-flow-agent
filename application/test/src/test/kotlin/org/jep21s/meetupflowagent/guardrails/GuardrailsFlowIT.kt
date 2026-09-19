@@ -58,6 +58,7 @@ class GuardrailsFlowIT : PostgresTestBase() {
       guardrailsService = GuardrailsService(LlmGuardrails(fake)),
       metrics = metrics,
       humanRequestRepository = org.jep21s.meetupflowagent.db.HumanRequestRepository(testConnectivity()),
+      usersRepository = org.jep21s.meetupflowagent.db.UsersRepository(testConnectivity()),
       proxyNotifier = io.mockk.mockk(relaxed = true),
     )
   }

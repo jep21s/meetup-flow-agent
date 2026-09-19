@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.ok
+import com.github.tomakehurst.wiremock.client.WireMock.okJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
@@ -29,7 +30,8 @@ import org.jep21s.meetupflowagent.llm.YandexEmbeddingClient
 import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.notify.ProxyNotifier
 import org.jep21s.meetupflowagent.observability.Metrics
-import org.jep21s.meetupflowagent.outbox.TelegramProxyTransport
+import org.jep21s.meetupflowagent.telegram.integration.TelegramProxyClient
+import org.jep21s.meetupflowagent.telegram.outbox.TelegramOutboxTransport
 import org.jep21s.meetupflowagent.starter.jackson.jacksonMapper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assumptions
@@ -88,6 +90,7 @@ class FullCycleE2ETest {
     guardrailsService = GuardrailsService(LlmGuardrails(KtorOpenAiLlmClient())),
     metrics = Metrics.inMemory(),
     humanRequestRepository = HumanRequestRepository(db),
+    usersRepository = org.jep21s.meetupflowagent.db.UsersRepository(db),
     proxyNotifier = object : ProxyNotifier {
       override suspend fun notify(notification: ProxyNotification) {
         notifications += notification
@@ -105,6 +108,7 @@ class FullCycleE2ETest {
     }
     System.clearProperty("proxy.baseUrl")
     System.clearProperty("proxy.token")
+    System.clearProperty("telegram.main.chat-id")
   }
 
   @Test
@@ -155,8 +159,10 @@ class FullCycleE2ETest {
   fun `approved result is published through outbox to telegram proxy`() {
     val proxyStub = WireMockServer(wireMockConfig().dynamicPort())
     proxyStub.start()
-    proxyStub.stubFor(post(urlEqualTo("/api/notify")).willReturn(ok()))
+    proxyStub.stubFor(post(urlEqualTo("/api/send")).willReturn(okJson("""{"messageId":1}""")))
     System.setProperty("proxy.baseUrl", proxyStub.baseUrl())
+    System.setProperty("proxy.token", "e2e-proxy-token")
+    System.setProperty("telegram.main.chat-id", "-100200")
     try {
       val result = runBlocking {
         service.run(
@@ -174,7 +180,7 @@ class FullCycleE2ETest {
       assertEquals("PENDING", deliveries.first().status)
 
       // такт доставки: клейм → транспорт → SENT; транспорт бьёт в WireMock-прокси
-      val transport = TelegramProxyTransport()
+      val transport = TelegramOutboxTransport(TelegramProxyClient())
       runBlocking {
         for (task in outboxRepository.claimPending(limit = 10)) {
           transport.deliver(task)
@@ -185,16 +191,14 @@ class FullCycleE2ETest {
       assertEquals("SENT", runBlocking {
         outboxRepository.deliveriesByFlow(result.flowId).first().status
       })
-      val requests = proxyStub.findAll(postRequestedFor(urlEqualTo("/api/notify")))
+      val requests = proxyStub.findAll(postRequestedFor(urlEqualTo("/api/send")))
       assertTrue(requests.isNotEmpty(), "прокси должен получить публикацию")
       val body = jacksonMapper.readTree(requests.last().bodyAsString)
-      assertEquals("EVENT_PUBLISHED", body.path("event").asText())
-      assertTrue(body.path("userIds").isEmpty, "публикация адресована общему каналу")
+      assertEquals(-100200L, body.path("chatId").asLong(), "публикация адресована общему каналу")
       assertTrue(
         body.path("text").asText().contains("Python SPb"),
         "текст анонса должен содержать название: ${body.path("text").asText().take(200)}",
       )
-      assertEquals(result.flowId.toString(), body.path("flowId").asText())
     } finally {
       proxyStub.stop()
     }

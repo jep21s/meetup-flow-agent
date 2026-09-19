@@ -34,6 +34,8 @@ picocli = "4.7.7"
 opentelemetry = "1.66.0"
 postgresql = "42.7.13"
 
+telegrambots = "6.9.7.1"
+
 testcontainers = "2.0.5"
 turbine = "1.2.1"
 wiremock = "3.13.2"
@@ -109,6 +111,8 @@ picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
 plugin-kotlin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlinVersion" }
 
 postgresql-driver = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+
+telegrambots = { module = "org.telegram:telegrambots", version.ref = "telegrambots" }
 
 test-ktor-server-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
 test-ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }

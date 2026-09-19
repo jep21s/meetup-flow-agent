@@ -11,6 +11,11 @@ dependencies {
   implementation(kotlin("stdlib"))
   // Тестируем прод-код через public API (internal из main здесь не виден)
   implementation(projects.main)
+  // логика извлечения вынесена в отдельный модуль (implementation main не транзитивен)
+  implementation(projects.meetupInfoExtractor)
+  implementation(projects.telegram)
+  // DTO Update в тестах телеграм-модуля (implementation-депы не транзитивны)
+  implementation(libs.telegrambots)
   // Стартеры нужны явно: implementation-депы main не транзитивны
   implementation("org.jep21s.meetupflowagent.libs:config-starter")
   implementation("org.jep21s.meetupflowagent.libs:jackson-starter")

@@ -130,10 +130,60 @@ curl -s localhost:8090/internal/metrics | grep meetup_
 UI наблюдаемости: Jaeger `:16686`, Grafana `:3000` (admin/admin, дашборд
 provisioned), Prometheus `:9090`.
 
+## Telegram-слой (модуль application/telegram) и прокси (Railway)
+
+`telegram-proxy/` — отдельный composite build (Ktor :8082, long polling через
+telegrambots) на Railway — **«тупая труба» без логики**: пересылает каждый апдейт
+целиком в `POST /api/telegram/updates` агента (RAW `MEETUP_FLOW_TOKEN`) и
+отправляет сообщения по командам `POST /api/send | /api/callback-answer |
+/api/message-keyboard-remove` (Bearer `PROXY_TOKEN`).
+
+Все решения — в модуле `application/telegram` основного сервиса:
+
+- **Вход**: фильтр источника (`TELEGRAM_SOURCE_CHAT_ID` + `TELEGRAM_SOURCE_TOPIC_ID`,
+  message_thread_id; пустые значения — фильтр выключен, прочие чаты игнорируются);
+  прошедшее фильтр — сырой passthrough в inbox с `idempotencyKey = "tg-<updateId>"`
+  (дубли глушатся) → флоу извлечения;
+- **HITL**: вопрос идёт кнопками (`hitl:<flowId>:<idx>`), заданные вопросы — в
+  таблице `telegram_questions` (Postgres); клик/reply → первый ответ побеждает
+  (`human_requests`), резюм флоу, кнопки снимаются у всех адресатов. Автор
+  ответа проходит allowlist — активные `users`: чужой отклоняется, вопрос
+  остаётся открытым;
+- **Выход**: адресация уведомлений (userIds → лички; пусто → общий канал
+  `TELEGRAM_MAIN_CHAT_ID`, кроме HITL — см. таблицу), доставка анонсов через
+  outbox-транспорт telegram_proxy.
+
+Адресация уведомлений агента:
+
+| Событие | Кому |
+|---|---|
+| `HUMAN_INPUT_REQUIRED` | активные `users` (личные чаты, кнопки); список пуст → вопрос **не** отправляется (не падает в общий канал), флоу закроется по `human.timeoutHours` |
+| `REMINDER`, `FLOW_FAILED` | активные `users`; пусто → общий канал |
+| `EVENT_PUBLISHED` | общий канал `TELEGRAM_MAIN_CHAT_ID` |
+
+Список адресатов — таблица `users`, наполняется вручную:
+
+```sql
+INSERT INTO users (id, telegram_user_id, display_name, role)
+VALUES (gen_random_uuid(), <tg_user_id>, '<Имя>', 'member');
+```
+
+**Kill-switch бота**: `TELEGRAM_BOT_ENABLED` по умолчанию `false` — тесты и
+локальный запуск (`./gradlew :telegram-proxy:main:run`) поднимают только
+Ktor-сервер, без long polling и вызовов Bot API; на Railway включается явно
+(пустой токен при включённом флаге — fail-fast на старте).
+
+Деплой: `./telegram-proxy/deploy-railway.sh` собирает fatJar, кладёт в
+wrapper-репо `railway-meetup-tg-proxy` и пушит — Railway пересобирает контейнер
+(long polling ⇒ один инстанс). Связка с агентом — env `PROXY_BASE_URL` /
+`PROXY_TOKEN` (общий секрет с `PROXY_TOKEN` прокси), полный список ENV —
+`telegram-proxy/.env.example`.
+
 ## Тесты и оценка качества
 
 ```bash
 ./gradlew :application:test:test                 # unit + integration (Testcontainers pg+pgvector, ноль внешних вызовов)
+./gradlew :telegram-proxy:main:test              # тесты прокси (бот выключен kill-switch'ом)
 set -a; source .env; set +a                      # реальные ключи:
 ./gradlew :application:evals:eval                # golden-наборы: guardrails TPR/FPR, extraction-точность; отчёт build/reports/evals/report.md
 ./gradlew :application:e2e:e2e                   # сквозные сценарии с реальными LLM
@@ -142,10 +192,13 @@ set -a; source .env; set +a                      # реальные ключи:
 ## Структура
 
 ```
-application/main    # сервис: agent/ llm/ guardrails/ domain/ flow/ db/ scheduler/ notify/ outbox/ observability/ route/
+application/meetup-info-extractor  # вся логика: agent/ llm/ guardrails/ domain/ flow/ db/ scheduler/ notify/ outbox/ (+ ресурсы: prompts, миграции, schema)
+application/telegram # telegram-слой: решения по апдейтам, HITL (telegram_questions), адресация исходящих — зависит от extractor
+application/main    # только REST-слой: Main, config (RestModule/TokenAuth/Cors), route/ — зависит от extractor и telegram
 application/test    # все unit/integration-тесты (Testcontainers, фейки)
 application/evals   # оценка качества на golden set (реальная модель)
 application/e2e     # сквозные тесты (реальная модель + реальная БД)
+telegram-proxy/     # Telegram-прокси на Railway: long polling ↔ REST агента (отд. wrapper-репо)
 libs/               # starters: config / jackson / logging (+ build-конвенции)
 infra/              # prometheus/grafana provisioning
 docker-compose.yaml # postgres(pgvector) + jaeger + prometheus + grafana

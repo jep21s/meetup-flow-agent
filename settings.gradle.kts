@@ -16,3 +16,4 @@ rootProject.name = "meetup-flow-agent"
 
 includeBuild("application")
 includeBuild("libs")
+includeBuild("telegram-proxy")

@@ -73,6 +73,7 @@ class ExtractionEvalTest {
       guardrailsService = org.jep21s.meetupflowagent.guardrails.GuardrailsService(guardrails),
       metrics = Metrics.inMemory(),
       humanRequestRepository = HumanRequestRepository(db),
+      usersRepository = org.jep21s.meetupflowagent.db.UsersRepository(db),
       proxyNotifier = noopNotifier,
     )
 
