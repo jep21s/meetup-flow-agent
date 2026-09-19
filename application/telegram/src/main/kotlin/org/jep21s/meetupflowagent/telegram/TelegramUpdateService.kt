@@ -36,7 +36,9 @@ private const val CALLBACK_PREFIX = "hitl:"
  * 4. message/channelPost из источника (telegram.source.chat-id + topic-id) —
  *    сырой passthrough: ВСЯ DTO Update как text в inbox (idempotencyKey
  *    "tg-<updateId>") + флоу PROCESSING — дальше работает meetup-info-extractor;
- * 5. прочее (чужие чаты/топики, не-текст) — игнор.
+ *    не-текстовые сообщения (медиа с caption и т.п.) НЕ отсеиваются — текст
+ *    в любом поле ищет модель;
+ * 5. прочее (чужие чаты/топики) — игнор.
  */
 @Singleton
 class TelegramUpdateService(
@@ -73,20 +75,19 @@ class TelegramUpdateService(
       return
     }
     val text = message.text
-    if (text.isNullOrBlank()) {
-      logger.debug { "skip non-text update: updateId=${update.updateId}" }
-      return
-    }
     val chatId = message.chat?.id ?: return
 
-    if (text.startsWith("/")) {
+    // команды и HITL-ответы имеют смысл только у текстовых сообщений; медиа
+    // (фото с caption и т.п.) проходит дальше в сырой passthrough — модель
+    // получает весь апдейт как есть и сама находит текст в любом поле
+    if (text != null && text.startsWith("/")) {
       handleCommand(chatId, text)
       return
     }
 
     // reply на заданный HITL-вопрос → свободный текст как ответ флоу-владельцу
     val replyTo = message.replyToMessage
-    if (replyTo != null) {
+    if (replyTo != null && text != null) {
       val pending = questionRepository.findAsked(chatId, replyTo.messageId.toLong())
       if (pending != null) {
         submitAnswer(pending.flowId, message.from?.id ?: 0L, text, pending.chatId, pending.messageId, callbackQueryId = null)
