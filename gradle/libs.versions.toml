@@ -1,0 +1,136 @@
+# Единый version catalog для всех builds репозитория.
+# Подключается в settings.gradle.kts каждого sub-build через:
+#   dependencyResolutionManagement { versionCatalogs { create("libs") { from(files("../gradle/libs.versions.toml")) } } }
+[versions]
+kotlinVersion = "2.4.20"
+jvm-language = "25"
+jvm-compiler = "25"
+
+assertj = "3.27.7"
+exposed = "1.5.0"
+hikaricp = "7.1.0"
+jackson = "2.22.2"
+jsoup = "1.23.2"
+junit-parametrized = "5.14.4"
+
+koin = "4.2.2"
+koin-compiler = "1.2.1"
+konvert = "4.5.1"
+ksp = "2.3.12"
+
+kotlinx-coroutines = "1.11.0"
+ktor = "3.5.2"
+
+json-schema-validator = "1.5.9"
+liquibase = "5.0.4"
+logback = "1.6.3"
+logstash-encoder = "9.0"
+logging-kotlin = "8.0.4"
+
+micrometer = "1.17.1"
+mockk = "1.14.11"
+picocli = "4.7.7"
+
+opentelemetry = "1.66.0"
+postgresql = "42.7.13"
+
+telegrambots = "6.9.7.1"
+
+testcontainers = "2.0.5"
+turbine = "1.2.1"
+wiremock = "3.13.2"
+
+[libraries]
+assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+exposed-bom = { module = "org.jetbrains.exposed:exposed-bom", version.ref = "exposed" }
+exposed-core = { module = "org.jetbrains.exposed:exposed-core" }
+exposed-jdbc = { module = "org.jetbrains.exposed:exposed-jdbc" }
+exposed-java-time = { module = "org.jetbrains.exposed:exposed-java-time" }
+exposed-json = { module = "org.jetbrains.exposed:exposed-json" }
+
+hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
+
+jackson-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin", version.ref = "jackson" }
+jackson-datatype = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+
+json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "json-schema-validator" }
+
+junit-kotlin = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "kotlinVersion" }
+junit-parametrized = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit-parametrized" }
+
+koin-bom = { module = "io.insert-koin:koin-bom", version.ref = "koin" }
+koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+koin-annotations = { module = "io.insert-koin:koin-annotations", version.ref = "koin" }
+koin-logger = { module = "io.insert-koin:koin-logger-slf4j", version.ref = "koin" }
+koin-ktor = { module = "io.insert-koin:koin-ktor", version.ref = "koin" }
+koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
+koin-test-junit5 = { module = "io.insert-koin:koin-test-junit5", version.ref = "koin" }
+koin-gradle-plugin = { module = "io.insert-koin:koin-gradle-plugin", version.ref = "koin" }
+
+konvert-lib = { module = "io.mcarle:konvert", version.ref = "konvert" }
+konvert-api = { module = "io.mcarle:konvert-api", version.ref = "konvert" }
+
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-slf4j = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-slf4j", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+ktor-server-double-receive = { module = "io.ktor:ktor-server-double-receive", version.ref = "ktor" }
+ktor-server-cio = { module = "io.ktor:ktor-server-cio", version.ref = "ktor" }
+ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
+ktor-server-default-headers = { module = "io.ktor:ktor-server-default-headers", version.ref = "ktor" }
+ktor-server-host-common = { module = "io.ktor:ktor-server-host-common", version.ref = "ktor" }
+ktor-server-status-pages = { module = "io.ktor:ktor-server-status-pages", version.ref = "ktor" }
+ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
+ktor-serialization-jackson = { module = "io.ktor:ktor-serialization-jackson", version.ref = "ktor" }
+
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+
+liquibase-core = { module = "org.liquibase:liquibase-core", version.ref = "liquibase" }
+
+logback = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+logstash-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-encoder" }
+logging-kotlin = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "logging-kotlin" }
+
+micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus", version.ref = "micrometer" }
+
+mockk = { module = "io.mockk:mockk-jvm", version.ref = "mockk" }
+
+opentelemetry-bom = { module = "io.opentelemetry:opentelemetry-bom", version.ref = "opentelemetry" }
+opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api" }
+opentelemetry-sdk = { module = "io.opentelemetry:opentelemetry-sdk" }
+opentelemetry-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp" }
+
+picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
+
+plugin-kotlin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlinVersion" }
+
+postgresql-driver = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+
+telegrambots = { module = "org.telegram:telegrambots", version.ref = "telegrambots" }
+
+test-ktor-server-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
+test-ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+testcontainers-bom = { module = "org.testcontainers:testcontainers-bom", version.ref = "testcontainers" }
+testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql" }
+
+turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
+
+wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
+
+[bundles]
+jackson = ["jackson-kotlin", "jackson-datatype"]
+junit = ["junit-kotlin", "assertj", "junit-parametrized"]
+kotlinx-coroutines = ["kotlinx-coroutines-core", "kotlinx-coroutines-slf4j"]
+ktor-server = ["ktor-server-core", "ktor-server-double-receive", "ktor-server-cio", "ktor-server-content-negotiation", "ktor-server-default-headers", "ktor-server-host-common", "ktor-server-status-pages", "ktor-server-cors", "ktor-serialization-jackson"]
+logging = ["logback", "logstash-encoder", "logging-kotlin"]
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlinVersion" }
+koin-compiler = { id = "io.insert-koin.compiler.plugin", version.ref = "koin-compiler" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

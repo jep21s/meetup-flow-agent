@@ -1,0 +1,8 @@
+# GET /api/flows/{flowId} — выписка шагов (реальный прогон 2026-09-14)
+seq=1 GUARDRAILS  :: {"verdict":"PASS","reasons":[]}                      (glm-5.3)
+seq=2 REASON      :: CoT: "The message contains: Event: SPb Go Community #20, Date: Thursday, October 15, 2026…" (3145 tokens, 10.8s)
+seq=3 ACTION      :: {"tool":"search_duplicate","arguments":"{\"eventDate\":\"2026-10-15\",…}"}
+seq=4 OBSERVATION :: {"ok":true,"text":"Кандидатов-дублей не найдено…"}
+seq=5 REASON      :: CoT: "No duplicates found. All data present: SPb, free, offline. Verdict APPROVED." (3041 tokens, 4.4s)
+seq=6 FINAL       :: {"reply":"{\"title\":\"SPb Go Community #20\",…}"}
+flow: status=COMPLETED, verdict={"status":"APPROVED","reasons":[]}
