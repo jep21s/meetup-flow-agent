@@ -18,9 +18,9 @@ subprojects {
 }
 
 // Версия артефакта:
-//   ветка ≠ master → <ветка>-<hash8>[-dirty]   (тест-сборка: префикс feature/ срезается,
+//   ветка ≠ main → <ветка>-<hash8>[-dirty]     (тест-сборка: префикс feature/ срезается,
 //     недопустимые символы заменяются на "-"; -dirty = есть незакоммиченные изменения)
-//   master + тег на текущем коммите → X.Y.Z    (прод-сборка; теги ставит workflow git-finalize)
+//   main + тег на текущем коммите → X.Y.Z      (прод-сборка; теги ставит workflow git-finalize)
 //   иначе → 1.0-SNAPSHOT.
 // ProcessBuilder вместо project.exec{}: в Gradle 9.x exec-лямбда потеряла receiver.
 fun getGitVersion(): String {
@@ -35,7 +35,7 @@ fun getGitVersion(): String {
 
   return try {
     val branch = git("branch", "--show-current")
-    if (branch.isNotEmpty() && branch != "master") {
+    if (branch.isNotEmpty() && branch != "main") {
       val name = branch.removePrefix("feature/")
         .replace(Regex("[^A-Za-z0-9._-]"), "-")
       val hash = git("rev-parse", "--short=8", "HEAD")

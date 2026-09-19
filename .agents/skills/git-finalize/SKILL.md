@@ -1,19 +1,19 @@
 ---
 name: git-finalize
-description: Финализация работы — branch, commit, merge в master, git tag
+description: Финализация работы — branch, commit, merge в main, git tag
 ---
 
 ## Что делает этот скилл
 
 Стандартный workflow финализации изменений в проекте meetup-flow-agent. Запускается по запросу пользователя (например: «закоммить и запушь», «заверши работу», «отбранчуйся и закоммить» и т.п.).
 
-Тег на merge-коммите master задаёт версию прод-артефакта: `getGitVersion()` в `application/build.gradle.kts` на master+тег даёт `X.Y.Z` → jar `main-X.Y.Z-all.jar` (прод-деплой). На ветках без merge/тегов версия `<ветка>-<hash>` — это тест-сборки (deploy-test), git-finalize к ним не применяется.
+Тег на merge-коммите main задаёт версию прод-артефакта: `getGitVersion()` в `application/build.gradle.kts` на main+тег даёт `X.Y.Z` → jar `main-X.Y.Z-all.jar` (прод-деплой). На ветках без merge/тегов версия `<ветка>-<hash>` — это тест-сборки (deploy-test), git-finalize к ним не применяется.
 
 ## Шаги
 
 Выполнять строго по порядку. Каждый шаг зависит от предыдущего.
 
-### 1. Branch (только если на master)
+### 1. Branch (только если на main)
 
 Проверить текущую ветку:
 
@@ -21,9 +21,9 @@ description: Финализация работы — branch, commit, merge в ma
 git branch --show-current
 ```
 
-- **Если `master`** — создать новую ветку. Имя строить по смыслу изменений: `feature/<краткое-описание>` для новых фич, `fix/<краткое-описание>` для багфиксов, `docs/<краткое-описание>` для документации. Использовать kebab-case.
+- **Если `main`** — создать новую ветку. Имя строить по смыслу изменений: `feature/<краткое-описание>` для новых фич, `fix/<краткое-описание>` для багфиксов, `docs/<краткое-описание>` для документации. Использовать kebab-case.
 - **Если уже на feature/fix/docs ветке** — пропустить этот шаг, продолжать коммитить в текущую ветку.
-- **Никогда не коммитить напрямую в master.**
+- **Никогда не коммитить напрямую в main.**
 
 ### 2. Commit
 
@@ -47,10 +47,10 @@ git add -A && git commit -m "<type>: <subject>"
 
 Если изменений нет — сообщить пользователю, остановиться.
 
-### 3. Merge в master
+### 3. Merge в main
 
 ```bash
-git checkout master && git merge <branch-name> --no-ff -m "Merge branch '<branch-name>'"
+git checkout main && git merge <branch-name> --no-ff -m "Merge branch '<branch-name>'"
 ```
 
 `--no-ff` — всегда создавать merge commit, даже если fast-forward возможен.

@@ -5,7 +5,7 @@ description: Деплой текущей фича-ветки meetup-flow-agent �
 
 ## Что делает этот скилл
 
-Полный цикл деплоя текущей фича-ветки проекта meetup-flow-agent на тестовый контур сервера realistic, без merge в master и без тегов. Работает только с тест-контуром — прод не трогает (прод-контур на realistic пока не развёрнут).
+Полный цикл деплоя текущей фича-ветки проекта meetup-flow-agent на тестовый контур сервера realistic, без merge в main и без тегов. Работает только с тест-контуром — прод не трогает (прод-контур на realistic пока не развёрнут).
 
 Итог: контейнер `meetup-flow-agent-test` на образе `localhost/meetup-flow-agent-test:<ветка>-<hash>`, доступен с сервера `http://127.0.0.1:8089` (через meetup-test-envoy; внешний nginx/домен на realistic пока не настроен).
 
@@ -13,10 +13,10 @@ description: Деплой текущей фича-ветки meetup-flow-agent �
 
 ## Предусловия
 
-- **Текущая ветка ≠ master.** Проверить: `git branch --show-current`. На master `getGitVersion()` даёт тег или `1.0-SNAPSHOT` — тестовая версия не получится. Если сейчас master:
+- **Текущая ветка ≠ main.** Проверить: `git branch --show-current`. На main `getGitVersion()` даёт тег или `1.0-SNAPSHOT` — тестовая версия не получится. Если сейчас main:
   - есть незакоммиченные изменения (`git status --short` непуст) → создать ветку по правилам из `git-finalize` (`feature/<краткое-описание>` / `fix/<...>`, kebab-case) и закоммитить: `git add -A && git commit -m "<type>: <subject>"` (conventional commits, на английском);
   - изменений нет → просто создать ветку от HEAD: `git checkout -b <имя>`;
-  - деплоить эту ветку. **Merge в master и git tag не делать** — это workflow `git-finalize`, для тест-деплоя не нужен.
+  - деплоить эту ветку. **Merge в main и git tag не делать** — это workflow `git-finalize`, для тест-деплоя не нужен.
 - Ветка коммитнута, иначе jar получит суффикс `-dirty` (допустимо, но предупредить пользователя).
 - Постgres-контур на realistic запущен (первый раз: `ssh realistic 'cd ~/realistic/postgres && podman-compose -f podman-compose.yaml up -d'`).
 
