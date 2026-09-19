@@ -7,7 +7,7 @@ description: Деплой текущей фича-ветки meetup-flow-agent �
 
 Полный цикл деплоя текущей фича-ветки проекта meetup-flow-agent на тестовый контур сервера realistic, без merge в main и без тегов. Работает только с тест-контуром — прод не трогает (прод-контур на realistic пока не развёрнут).
 
-Итог: контейнер `meetup-flow-agent-test` на образе `localhost/meetup-flow-agent-test:<ветка>-<hash>`, доступен с сервера `http://127.0.0.1:8089` (через meetup-test-envoy; внешний nginx/домен на realistic пока не настроен).
+Итог: контейнер `meetup-flow-agent-test` на образе `localhost/meetup-flow-agent-test:<ветка>-<hash>`, доступен с сервера `http://127.0.0.1:8089` (через meetup-test-envoy). Извне — `http://85.193.82.142/test/...`: хостовой nginx (`~/nginx/sites-available/meetup-test.conf`) режет префикс `/test/` и проксирует в envoy; всё вне `/test/` — 404. `MEETUP_FLOW_URL` для telegram-proxy на Railway = `http://85.193.82.142/test`.
 
 Логи приложения едут на сервер mysterious (opensearch, индексы `fluent-bit-test-*`) — как их смотреть, см. скилл `server-ops` / `references/mysterious-logs.md`.
 
@@ -60,7 +60,7 @@ ssh realistic 'cd ~/realistic/test && podman-compose -f podman-compose.yaml down
 ssh realistic 'sleep 10 && podman ps --filter name=meetup-flow-agent --format "{{.Status}}" && podman logs --tail 30 meetup-flow-agent-test'
 ```
 
-Liveness через envoy (с сервера): `ssh realistic 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8089/api/health'` — ожидается 401 (нет bearer APP_TOKEN) или 404; **любой ответ приложения** означает, что цепочка жива. 502/503 — приложение не поднялось: смотреть логи, подождать 10–15 сек (прогрев JVM) и повторить.
+Liveness через envoy (с сервера): `ssh realistic 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8089/api/health'` — ожидается 401 (нет bearer APP_TOKEN) или 404; **любой ответ приложения** означает, что цепочка жива. 502/503 — приложение не поднялось: смотреть логи, поднять 10–15 сек (прогрев JVM) и повторить. Извне то же самое: `curl http://85.193.82.142/test/api/health` (через nginx, без ssh).
 
 ## Важно
 
