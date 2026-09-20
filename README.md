@@ -105,6 +105,12 @@ deliveryDedupKey) — для поиска/чисток/бэкфиллов. Пр�
    `UPDATE destinations SET is_active = true,
      config = '{"calendarId":"<id@group.calendar.google.com>"}'::jsonb
    WHERE name = 'google_main';`
+**E2E с реальным Google Calendar**: `docker compose up -d postgres`, затем
+`set -a && . ./.env && set +a && ./gradlew :application:e2e:e2e --tests '*GoogleCalendarE2ETest'`
+(нужен `GOOGLE_CALENDAR_CREDENTIALS_JSON` в `.env`; календарь — `GOOGLE_E2E_CALENDAR_ID`,
+по умолчанию тестовый; создаёт и удаляет свои события, состояние восстанавливает).
+Без ключа тест молча пропускается (Assumptions).
+
 4. (Опционально) дослать историю — новые PENDING-доставки существующих публикаций:
    `INSERT INTO outbox_deliveries (id, outbox_message_id, destination_id, status,
      attempts, next_retry_at, created_at, updated_at)

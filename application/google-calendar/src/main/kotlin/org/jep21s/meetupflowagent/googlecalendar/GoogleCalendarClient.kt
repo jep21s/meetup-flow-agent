@@ -5,8 +5,10 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.delete
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -63,17 +65,9 @@ class GoogleCalendarClient(
    * [InsertOutcome.AlreadyPresent] (успех, событие уже в календаре).
    */
   suspend fun insertEvent(calendarId: String, eventBody: JsonNode): InsertOutcome {
-    val id = calendarId.trim()
-    if (!CALENDAR_ID.matches(id)) {
-      throw GoogleApiException("invalid calendarId '$id' — expected like 'xxx@group.calendar.google.com' or 'primary'")
-    }
+    val id = requireCalendarId(calendarId)
     val creds = credentials()
-    var response = postEvent(id, eventBody, accessToken(creds))
-    if (response.status.value == 401) {
-      logger.info { "google calendar 401 — refreshing access token, single retry of events.insert" }
-      tokenMutex.withLock { cachedToken = null }
-      response = postEvent(id, eventBody, accessToken(creds))
-    }
+    val response = withTokenRetry(creds) { token -> postEvent(id, eventBody, token) }
     val body = response.bodyAsText()
     return when {
       response.status.isSuccess() ->
@@ -82,6 +76,72 @@ class GoogleCalendarClient(
       else -> throw GoogleApiException(
         "google calendar events.insert HTTP ${response.status.value} calendar=$id: ${body.take(200)}",
       )
+    }
+  }
+
+  /** Событие по клиентскому id (проверка доставки/чистки); null — нет или удалено. */
+  suspend fun findEvent(calendarId: String, googleEventId: String): JsonNode? {
+    val id = requireCalendarId(calendarId)
+    requireEventId(googleEventId)
+    val creds = credentials()
+    val response = withTokenRetry(creds) { token ->
+      httpClient.get("$apiBase/calendars/$id/events/$googleEventId") {
+        header(HttpHeaders.Authorization, "Bearer $token")
+      }
+    }
+    val body = response.bodyAsText()
+    return when {
+      response.status.isSuccess() -> jacksonMapper.readTree(body)
+      response.status.value == 404 || response.status.value == 410 -> null
+      else -> throw GoogleApiException(
+        "google calendar events.get HTTP ${response.status.value} calendar=$id event=$googleEventId: ${body.take(200)}",
+      )
+    }
+  }
+
+  /** Удаление события по клиентскому id; отсутствующее (404/410) — не ошибка. */
+  suspend fun deleteEvent(calendarId: String, googleEventId: String) {
+    val id = requireCalendarId(calendarId)
+    requireEventId(googleEventId)
+    val creds = credentials()
+    val response = withTokenRetry(creds) { token ->
+      httpClient.delete("$apiBase/calendars/$id/events/$googleEventId") {
+        header(HttpHeaders.Authorization, "Bearer $token")
+      }
+    }
+    if (!response.status.isSuccess() && response.status.value != 404 && response.status.value != 410) {
+      val body = response.bodyAsText()
+      throw GoogleApiException(
+        "google calendar events.delete HTTP ${response.status.value} calendar=$id event=$googleEventId: ${body.take(200)}",
+      )
+    }
+  }
+
+  /** Один повтор с refresh токена при 401 (не ретрай доставки — его держит поллер). */
+  private suspend fun withTokenRetry(
+    creds: ServiceAccountCredentials,
+    call: suspend (String) -> HttpResponse,
+  ): HttpResponse {
+    var response = call(accessToken(creds))
+    if (response.status.value == 401) {
+      logger.info { "google calendar 401 — refreshing access token, single retry" }
+      tokenMutex.withLock { cachedToken = null }
+      response = call(accessToken(creds))
+    }
+    return response
+  }
+
+  private fun requireCalendarId(calendarId: String): String {
+    val id = calendarId.trim()
+    if (!CALENDAR_ID.matches(id)) {
+      throw GoogleApiException("invalid calendarId '$id' — expected like 'xxx@group.calendar.google.com' or 'primary'")
+    }
+    return id
+  }
+
+  private fun requireEventId(googleEventId: String) {
+    if (!EVENT_ID.matches(googleEventId)) {
+      throw GoogleApiException("invalid googleEventId '$googleEventId'")
     }
   }
 
@@ -129,6 +189,7 @@ class GoogleCalendarClient(
     private const val JWT_BEARER_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer"
     private const val TOKEN_EXPIRY_MARGIN_SECONDS = 60L
     private val CALENDAR_ID = Regex("[A-Za-z0-9@._%+-]{3,256}")
+    private val EVENT_ID = Regex("[A-Za-z0-9_-]{3,256}")
 
     fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
       install(HttpTimeout) {

@@ -168,6 +168,43 @@ class GoogleCalendarClientTest {
   }
 
   @Test
+  fun `findEvent returns parsed node on 200 and null on 404`() {
+    val c = client { request ->
+      when {
+        request.url.encodedPath == "/token" -> respond(okToken, HttpStatusCode.OK, jsonHeaders())
+        request.url.encodedPath.substringAfterLast("/events/") == "mfa123" ->
+          respond("""{"id":"mfa123","summary":"Митап"}""", HttpStatusCode.OK, jsonHeaders())
+        else -> respond("""{"error":{"code":404}}""", HttpStatusCode.NotFound, jsonHeaders())
+      }
+    }
+
+    val found = runBlocking { c.findEvent(calendarId, "mfa123") }
+    assertThat(found?.path("summary")?.asText()).isEqualTo("Митап")
+    assertThat(runBlocking { c.findEvent(calendarId, "mfa456") }).isNull()
+  }
+
+  @Test
+  fun `deleteEvent treats 204 and 404 as success and 500 as failure`() {
+    val c = client { request ->
+      when {
+        request.url.encodedPath == "/token" -> respond(okToken, HttpStatusCode.OK, jsonHeaders())
+        request.url.encodedPath.substringAfterLast("/events/") == "mfa123" ->
+          respond("", HttpStatusCode.NoContent)
+        request.url.encodedPath.substringAfterLast("/events/") == "mfa404" ->
+          respond("""{"error":{"code":404}}""", HttpStatusCode.NotFound, jsonHeaders())
+        else -> respond("""{"error":{"code":500}}""", HttpStatusCode.InternalServerError, jsonHeaders())
+      }
+    }
+
+    runBlocking {
+      c.deleteEvent(calendarId, "mfa123") // 204 — ок
+      c.deleteEvent(calendarId, "mfa404") // уже удалено — ок
+    }
+    val ex = assertThrows<GoogleApiException> { runBlocking { c.deleteEvent(calendarId, "mfa500") } }
+    assertThat(ex.message).contains("events.delete").contains("HTTP 500")
+  }
+
+  @Test
   fun `missing credentials throw with ENV hint`() {
     // свойство не выставлено → google.calendar.credentials-json пуст
     val c = GoogleCalendarClient(
