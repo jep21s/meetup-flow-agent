@@ -61,8 +61,12 @@ class GoogleCalendarOutboxTransport(
     // RFC3339 с обязательными секундами и смещением с двоеточием (для UTC — Z)
     private val RFC3339 = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
 
-    /** Google требует charset id из base32hex (+ разрешены -_): hex UUID без дефисов подходит. */
-    fun googleEventId(eventId: String): String = "mfa-" + eventId.replace("-", "").lowercase()
+    /**
+     * Google требует id из base32hex (0-9, a-v), без дефисов — проверено живым
+     * вызовом: id с дефисом отбивается 400 «Invalid resource id value».
+     * hex UUID после убирания дефисов укладывается в алфавит.
+     */
+    fun googleEventId(eventId: String): String = "mfa" + eventId.replace("-", "").lowercase()
 
     /**
      * Тело Calendar API events.insert из канонического снапшота: start/end в

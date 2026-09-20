@@ -53,7 +53,7 @@ class GoogleCalendarOutboxTransportTest {
 
     val body = bodySlot.captured
     assertThat(body.path("summary").asText()).isEqualTo("SPb Go #20")
-    assertThat(body.path("id").asText()).isEqualTo("mfa-0f14d0ab96054a62a9e45ed26688389b")
+    assertThat(body.path("id").asText()).isEqualTo("mfa0f14d0ab96054a62a9e45ed26688389b")
     assertThat(body.path("start").path("dateTime").asText()).isEqualTo("2026-10-15T19:00:00+03:00")
     assertThat(body.path("end").path("dateTime").asText()).isEqualTo("2026-10-15T22:00:00+03:00") // +180 мин
   }

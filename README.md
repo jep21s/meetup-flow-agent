@@ -90,7 +90,7 @@ is_active) VALUES (gen_random_uuid(), '<type>', '<name>', '{}'::jsonb, true)` �
 Анонсы вставляются в Google Calendar через сервисный аккаунт (OAuth2
 grant_type=jwt-bearer, RS256 подпись JWT штатным `java.security` — без внешних
 зависимостей). **Идемпотентность** at-least-once: событию задаётся клиентский id
-`mfa-<eventId>`, повторная вставка после краша получает 409 и считается успехом
+`mfa<eventId hex>` (base32hex, без дефисов), повторная вставка после краша получает 409 и считается успехом
 (дублей в календаре нет); метки `extendedProperties.private` (eventId/flowId/
 deliveryDedupKey) — для поиска/чисток/бэкфиллов. При пустом `endsAt` событие
 ставится длительностью `google.calendar.default-duration-minutes` (по умолчанию

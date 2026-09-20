@@ -34,8 +34,8 @@ class GoogleEventBodyTest {
 
     val body = GoogleCalendarOutboxTransport.buildEventBody(payload)
 
-    assertThat(body.path("id").asText()).isEqualTo("mfa-0f14d0ab96054a62a9e45ed26688389b")
-    assertThat(body.path("id").asText()).matches("^mfa-[0-9a-f]+$") // charset id Google (base32hex + -_)
+    assertThat(body.path("id").asText()).isEqualTo("mfa0f14d0ab96054a62a9e45ed26688389b")
+    assertThat(body.path("id").asText()).matches("^mfa[0-9a-v]+$") // base32hex — алфавит id Google
     assertThat(body.path("summary").asText()).isEqualTo("SPb Go #20")
     assertThat(body.path("location").asText())
       .isEqualTo("Мраморный зал ПОМИ РАН, наб. реки Фонтанки, 27, Санкт-Петербург")

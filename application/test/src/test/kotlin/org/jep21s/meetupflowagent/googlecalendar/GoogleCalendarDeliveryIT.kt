@@ -81,7 +81,7 @@ class GoogleCalendarDeliveryIT : PostgresTestBase() {
     assertThat(insert.getHeader("Authorization")).isEqualTo("Bearer it-token")
     val body = jacksonMapper.readTree(insert.bodyAsString)
     assertThat(body.path("summary").asText()).isEqualTo("SPb Go #20")
-    assertThat(body.path("id").asText()).startsWith("mfa-")
+    assertThat(body.path("id").asText()).startsWith("mfa")
     assertThat(body.path("start").path("timeZone").asText()).isEqualTo("Europe/Moscow")
     assertThat(body.path("extendedProperties").path("private").path("flowId").asText()).isEqualTo(flowId.toString())
   }
