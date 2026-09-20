@@ -10,8 +10,10 @@ import java.time.OffsetDateTime
  * Правила:
  * - REJECTED: платное (isFree=false или цена), не СПб (город после нормализации),
  *   нет офлайн-формата;
- * - NEEDS_REVIEW: нет обязательных title/startsAt/city либо отсутствуют
- *   registrationUrl / endsAt / venueName (MISSING_DATA);
+ * - NEEDS_REVIEW: нет обязательных title/startsAt/city либо отсутствует
+ *   registrationUrl или площадка (venueName+address) (MISSING_DATA);
+ *   endsAt НЕ обязателен — страницы мероприятий часто не публикуют время
+ *   окончания, канал доставки применяет дефолтную длительность;
  * - иначе APPROVED.
  */
 object ContractValidator {
@@ -47,8 +49,9 @@ object ContractValidator {
     if (dto.startsAt != null && startsAt == null) {
       review += "BAD_STARTS_AT"
     }
-    // venueName некритичен при известном address (Площадь Конституции, 2 — адрес и есть площадка)
-    if (dto.registrationUrl.isNullOrBlank() || dto.endsAt.isNullOrBlank() ||
+    // venueName некритичен при известном address (Площадь Конституции, 2 — адрес и есть площадка);
+    // endsAt не обязателен — конец добирается дефолтной длительностью канала доставки
+    if (dto.registrationUrl.isNullOrBlank() ||
       (dto.venueName.isNullOrBlank() && dto.address.isNullOrBlank())
     ) {
       review += "MISSING_DATA"
