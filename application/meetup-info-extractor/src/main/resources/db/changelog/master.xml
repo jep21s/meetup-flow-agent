@@ -11,5 +11,7 @@
   <include file="02-indexes.xml" relativeToChangelogFile="true"/>
   <!-- файл лежит в модуле application/telegram (общий classpath) -->
   <include file="03-telegram-questions.xml" relativeToChangelogFile="true"/>
+  <!-- файл лежит в модуле application/google-calendar (общий classpath) -->
+  <include file="04-google-calendar-destination.xml" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

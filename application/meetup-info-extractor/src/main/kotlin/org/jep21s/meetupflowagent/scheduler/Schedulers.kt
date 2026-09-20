@@ -24,11 +24,12 @@ import java.time.Instant
 
 private val logger = KotlinLogging.logger { }
 
-/** Шкала ретраев "1m,5m,15m,1h,6h" (§12). */
+/** Шкала ретраев "1m,5m,15m,1h,6h" (§12); суффиксы s/m/h. */
 object RetrySchedule {
   fun parse(raw: String): List<Duration> = raw.split(",").map { slot ->
     val value = slot.trim().dropLast(1).toLong()
     when (slot.trim().last()) {
+      's' -> Duration.ofSeconds(value)
       'm' -> Duration.ofMinutes(value)
       'h' -> Duration.ofHours(value)
       else -> Duration.ofMinutes(value)

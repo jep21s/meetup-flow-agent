@@ -18,6 +18,9 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 │   │                          # scheduler/ notify/ outbox/ resilience/ observability/
 │   │                          # + ресурсы (prompts, db-миграции, schema, context)
 │   │                          # свой Koin-модуль ExtractorBeanConfig
+│   ├── google-calendar/       # outbox-транспорт google_calendar: анонсы в Google
+│   │                          # Calendar через сервисный аккаунт (OAuth2 jwt-bearer,
+│   │                          # Calendar API v3); свой Koin-модуль
 │   └── main/                  # ТОЛЬКО REST-слой: Main.kt, config/ (RestModule, TokenAuth,
 │                              # Cors, MainBeanConfig-scope), route/; fatJar; :8090
 └── telegram-proxy/            Telegram-прокси на Railway (long polling ↔ REST агента)
@@ -43,6 +46,7 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
 - Разделение как в messenger-adapter: `application/main` — тонкий REST-слой (endpoint), вся логика — в модуле `application/meetup-info-extractor` (зависимость `projects.meetupInfoExtractor`; каждому модулю, использующему логику, — своя явная зависимость, implementation не транзитивен)
 - Роуты — `fun Route.xxx()` extension в пакете `route/`, подключаются в `RestModule.kt`
 - Jackson — только через `JacksonConfig.customizer` (единый конфиг для server/client/ручной сериализации)
+- **@Test с expression body обязан объявлять `: Unit`**: `fun \`x\`(): Unit = runBlocking { … assertThat(…).isEqualTo(…) }` — цепочки assertj возвращают значение, и JUnit молча выбрасывает такие методы («must not return a value»), класс остаётся без тестов. Уже однажды 26 тестов в 5 классах тихо не исполнялись.
 - Конфиг — `application/main/src/main/resources/config.properties` с `${ENV_VAR:default}`, чтение через `ConfigLoader`
 - Логирование — только kotlin-logging (`KotlinLogging.logger { }`)
 

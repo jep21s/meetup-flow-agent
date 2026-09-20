@@ -43,7 +43,7 @@ class OutboxRepositoryIT : PostgresTestBase() {
   )
 
   @Test
-  fun `enqueue creates message with delivery per active destination and event atomically`() = runBlocking {
+  fun `enqueue creates message with delivery per active destination and event atomically`(): Unit = runBlocking {
     insertDestination("gcal_main", "google_calendar", active = true)
     insertDestination("disabled_one", "telegram_proxy", active = false)
     val flowId = flowRepository.create("PROCESSING")
@@ -103,7 +103,7 @@ class OutboxRepositoryIT : PostgresTestBase() {
   }
 
   @Test
-  fun `resetStuck returns crashed SENDING deliveries to the queue`() = runBlocking {
+  fun `resetStuck returns crashed SENDING deliveries to the queue`(): Unit = runBlocking {
     val flowId = flowRepository.create("PROCESSING")
     outboxRepository.insertEventAndEnqueue(approvedEvent(flowId))
     outboxRepository.claimPending(limit = 10) // SENDING — «краш» до markSent
@@ -114,7 +114,7 @@ class OutboxRepositoryIT : PostgresTestBase() {
   }
 
   @Test
-  fun `markSent and markFailedPermanent set terminal states`() = runBlocking {
+  fun `markSent and markFailedPermanent set terminal states`(): Unit = runBlocking {
     val flowId = flowRepository.create("PROCESSING")
     outboxRepository.insertEventAndEnqueue(approvedEvent(flowId))
     val deliveryId = outboxRepository.claimPending(limit = 10).single().deliveryId
@@ -135,7 +135,7 @@ class OutboxRepositoryIT : PostgresTestBase() {
   }
 
   @Test
-  fun `no active destinations still enqueues message without deliveries`() = runBlocking {
+  fun `no active destinations still enqueues message without deliveries`(): Unit = runBlocking {
     executeSql("UPDATE destinations SET is_active = false")
     val flowId = flowRepository.create("PROCESSING")
 

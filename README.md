@@ -21,7 +21,7 @@ flowchart LR
     TOOLS --> DB[("Postgres 18 + pgvector<br/>events · flows · flow_steps ·<br/>duplicates · human_requests")]
     FLOW -->|"финальный JSON"| V["ContractParser →<br/>ContractValidator<br/>(детерминированный)"]
     V -->|"APPROVED: событие + публикация<br/>одной транзакцией"| OBX[("outbox_messages +<br/>outbox_deliveries — fan-out<br/>на активные destinations")]
-    OBX -->|"OutboxPoller: клейм + ретраи<br/>1m..6h (≤6)<br/>at-least-once (deliveryId)"| TR["OutboxTransport<br/>по destinations.type:<br/>telegram_proxy → EVENT_PUBLISHED;<br/>google_calendar — точка расширения"]
+    OBX -->|"OutboxPoller: клейм + ретраи<br/>1m..6h (≤6)<br/>at-least-once (deliveryId)"| TR["OutboxTransport<br/>по destinations.type:<br/>telegram_proxy → EVENT_PUBLISHED;<br/>google_calendar → Calendar API v3"]
     TR -->|"POST /api/notify"| P
     FLOW -->|"HUMAN_INPUT_REQUIRED"| P
     SCHED -->|"REMINDER · FLOW_FAILED"| P
@@ -72,9 +72,10 @@ Resilience: in-request retry LLM (2×, backoff+jitter), retry-шкала фло�
   неудача → ретраи `1m→5m→15m→1h→6h` (≤6), затем `FAILED_PERMANENT` (флоу не трогается);
   зависшие в `SENDING` после краша возвращаются в очередь через 5 минут;
 - семантика **at-least-once**: прокси дедуплицирует по `deliveryId`;
-- transports — точка расширения: `telegram_proxy` (реализован: `EVENT_PUBLISHED` в
-  общий канал через существующий `/api/notify`, готовый текст анонса), гугл-календарь
-  и другие — новые имплементации `OutboxTransport`;
+- transports — точка расширения; реализованы `telegram_proxy` (`EVENT_PUBLISHED` в
+  общий канал через существующий `/api/notify`, готовый текст анонса) и
+  `google_calendar` (модуль `application/google-calendar`: анонсы в Google Calendar
+  через сервисный аккаунт, Calendar API v3; см. ниже);
 - секреты (токены) — в ENV, `destinations.config` хранит только не-секретные параметры;
 - наблюдение: блок `deliveries` в `GET /api/flows/{id}`, ручка `GET /internal/outbox`,
   метрики `meetup_outbox_deliveries_total{status,destination}`, `meetup_outbox_depth`.
@@ -83,6 +84,34 @@ Resilience: in-request retry LLM (2×, backoff+jitter), retry-шкала фло�
 is_active) VALUES (gen_random_uuid(), '<type>', '<name>', '{}'::jsonb, true)` —
 новые публикации получат доставку в него автоматически (нужна имплементация
 транспорта с тем же `type`, иначе доставка завершится `UNSUPPORTED_TRANSPORT`).
+
+### Канал `google_calendar` (модуль `application/google-calendar`)
+
+Анонсы вставляются в Google Calendar через сервисный аккаунт (OAuth2
+grant_type=jwt-bearer, RS256 подпись JWT штатным `java.security` — без внешних
+зависимостей). **Идемпотентность** at-least-once: событию задаётся клиентский id
+`mfa-<eventId>`, повторная вставка после краша получает 409 и считается успехом
+(дублей в календаре нет); метки `extendedProperties.private` (eventId/flowId/
+deliveryDedupKey) — для поиска/чисток/бэкфиллов. При пустом `endsAt` событие
+ставится длительностью `google.calendar.default-duration-minutes` (по умолчанию
+180 мин), таймзона — `google.calendar.timezone` (по умолчанию Europe/Moscow).
+
+Включение канала (сеется миграцией `121-…` **выключенным** — до появления ключа):
+
+1. GCP: сервисный аккаунт → JSON-ключ; календарю дать доступ `client_email'у
+   сервисного аккаунта с правом «Вносить изменения в события».
+2. ENV: `GOOGLE_CALENDAR_CREDENTIALS_JSON` — JSON-ключ целиком одной строкой.
+3. Включить назначение и указать календарь (не-секрет — в `destinations.config`):
+   `UPDATE destinations SET is_active = true,
+     config = '{"calendarId":"<id@group.calendar.google.com>"}'::jsonb
+   WHERE name = 'google_main';`
+4. (Опционально) дослать историю — новые PENDING-доставки существующих публикаций:
+   `INSERT INTO outbox_deliveries (id, outbox_message_id, destination_id, status,
+     attempts, next_retry_at, created_at, updated_at)
+   SELECT gen_random_uuid(), m.id,
+     (SELECT id FROM destinations WHERE name = 'google_main'),
+     'PENDING', 0, now(), now(), now()
+   FROM outbox_messages m;`
 
 ## Инструменты (SOP)
 

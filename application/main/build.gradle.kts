@@ -20,6 +20,8 @@ dependencies {
   implementation(projects.meetupInfoExtractor)
   // telegram-слой: решения по апдейтам/адресация (endpoint направляет сюда)
   implementation(projects.telegram)
+  // outbox-транспорт google_calendar: анонсы в Google Calendar (сервисный аккаунт)
+  implementation(projects.googleCalendar)
   // Стартеры из libs build — GA-координаты без версии (composite substitution)
   implementation("org.jep21s.meetupflowagent.libs:jackson-starter")
   implementation("org.jep21s.meetupflowagent.libs:logging-starter")

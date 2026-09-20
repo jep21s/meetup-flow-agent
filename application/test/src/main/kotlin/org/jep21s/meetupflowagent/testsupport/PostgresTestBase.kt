@@ -4,7 +4,6 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.mockk.every
 import io.mockk.mockk
-import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.deleteAll
@@ -57,12 +56,11 @@ abstract class PostgresTestBase {
       Flows.deleteAll()
       Users.deleteAll()
       org.jep21s.meetupflowagent.telegram.db.TelegramQuestions.deleteAll()
-      // справочник: оставляем только сеянную миграцией telegram_main и включаем её —
-      // тесты добавляют/выключают свои назначения
+      // справочник: оставляем только сеянную миграцией telegram_main и возвращаем
+      // ей исходный вид (тип/конфиг тесты мутируют UPDATE-ом) — тесты добавляют/
+      // выключают свои назначения
       Destinations.deleteWhere { Destinations.name neq "telegram_main" }
-      Destinations.update({ Destinations.name eq "telegram_main" }) {
-        it[isActive] = true
-      }
+      exec("UPDATE destinations SET type = 'telegram_proxy', config = '{}'::jsonb, is_active = true WHERE name = 'telegram_main'")
     }
   }
 
