@@ -142,8 +142,9 @@ deliveryDedupKey) — для поиска/чисток/бэкфиллов. Пр�
 
 `application/main/src/main/resources/schema/event-contract.schema.json`;
 детерминированная пост-валидация кодом: обязательны title/startsAt/city;
-платное/не-СПб/online-only → REJECTED; нет registrationUrl/endsAt/площадки →
-NEEDS_REVIEW; дубль ≥0.92 → DUPLICATE.
+платное/не-СПб/online-only → REJECTED; нет registrationUrl/площадки →
+NEEDS_REVIEW (endsAt не обязателен — канал доставки применяет дефолтную
+длительность); дубль ≥0.92 → DUPLICATE.
 
 ## Запуск
 

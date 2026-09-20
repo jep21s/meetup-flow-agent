@@ -64,6 +64,16 @@ class ContractValidatorTest {
   }
 
   @Test
+  fun `missing endsAt stays APPROVED — delivery channel applies default duration`() {
+    // страницы мероприятий часто не публикуют время окончания (live-кейс:
+    // team.vk.company/ai-security-nights → NEEDS_REVIEW/MISSING_DATA без события)
+    val validated = ContractValidator.validate(dto(endsAt = null))
+    assertThat(validated.verdict.status).isEqualTo(VerdictStatus.APPROVED)
+    assertThat(validated.verdict.reasons).isEmpty()
+    assertThat(validated.endsAtInstant).isNull()
+  }
+
+  @Test
   fun `missing mandatory fields are NEEDS_REVIEW not REJECTED`() {
     val v = ContractValidator.validate(dto(title = null, startsAt = null, city = null)).verdict
     assertThat(v.status).isEqualTo(VerdictStatus.NEEDS_REVIEW)
