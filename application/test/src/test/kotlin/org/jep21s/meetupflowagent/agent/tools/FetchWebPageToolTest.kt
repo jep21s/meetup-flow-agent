@@ -79,7 +79,7 @@ class FetchWebPageToolTest {
   private fun url(path: String) = "http://127.0.0.1:$port$path"
 
   @Test
-  fun `html page extracts text`() = runBlocking {
+  fun `html page extracts text`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"${url("/html")}"}"""))
     assertThat(result).isInstanceOf(ToolResult.Success::class.java)
     assertThat((result as ToolResult.Success).text).contains("Митап про Kotlin")
@@ -87,71 +87,71 @@ class FetchWebPageToolTest {
   }
 
   @Test
-  fun `plain text normalized`() = runBlocking {
+  fun `plain text normalized`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"${url("/plain")}"}"""))
     assertThat(result).isInstanceOf(ToolResult.Success::class.java)
     assertThat((result as ToolResult.Success).text).isEqualTo("просто текст страницы")
   }
 
   @Test
-  fun `unsupported content type rejected`() = runBlocking {
+  fun `unsupported content type rejected`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"${url("/json")}"}"""))
     assertThat(result).isInstanceOf(ToolResult.Error::class.java)
     assertThat((result as ToolResult.Error).code).isEqualTo("UNSUPPORTED_CONTENT_TYPE")
   }
 
   @Test
-  fun `http 404 mapped to HTTP_4XX`() = runBlocking {
+  fun `http 404 mapped to HTTP_4XX`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"${url("/notfound")}"}"""))
     assertThat((result as ToolResult.Error).code).isEqualTo("HTTP_4XX")
   }
 
   @Test
-  fun `http 500 mapped to HTTP_5XX`() = runBlocking {
+  fun `http 500 mapped to HTTP_5XX`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"${url("/boom")}"}"""))
     assertThat((result as ToolResult.Error).code).isEqualTo("HTTP_5XX")
   }
 
   @Test
-  fun `timeout mapped to TIMEOUT`() = runBlocking {
+  fun `timeout mapped to TIMEOUT`(): Unit = runBlocking {
     val result = tool(shortTimeoutClient())
       .execute(jacksonMapper.readTree("""{"url":"${url("/slow")}"}"""))
     assertThat((result as ToolResult.Error).code).isEqualTo("TIMEOUT")
   }
 
   @Test
-  fun `redirect followed once`() = runBlocking {
+  fun `redirect followed once`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"${url("/redirect")}"}"""))
     assertThat(result).isInstanceOf(ToolResult.Success::class.java)
   }
 
   @Test
-  fun `redirect loop hits REDIRECT_LIMIT`() = runBlocking {
+  fun `redirect loop hits REDIRECT_LIMIT`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"${url("/self")}"}"""))
     assertThat((result as ToolResult.Error).code).isEqualTo("REDIRECT_LIMIT")
   }
 
   @Test
-  fun `oversized body mapped to TOO_LARGE`() = runBlocking {
+  fun `oversized body mapped to TOO_LARGE`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"${url("/big")}"}"""))
     assertThat((result as ToolResult.Error).code).isEqualTo("TOO_LARGE")
   }
 
   @Test
-  fun `localhost blocked by default ssrf guard`() = runBlocking {
+  fun `localhost blocked by default ssrf guard`(): Unit = runBlocking {
     val strictTool = FetchWebPageTool() // DEFAULT guard + defaultHttpClient
     val result = strictTool.execute(jacksonMapper.readTree("""{"url":"${url("/html")}"}"""))
     assertThat((result as ToolResult.Error).code).isEqualTo("SSRF_BLOCKED")
   }
 
   @Test
-  fun `missing url argument rejected`() = runBlocking {
+  fun `missing url argument rejected`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("{}"))
     assertThat((result as ToolResult.Error).code).isEqualTo("INVALID_ARGS")
   }
 
   @Test
-  fun `non-http scheme rejected`() = runBlocking {
+  fun `non-http scheme rejected`(): Unit = runBlocking {
     val result = tool().execute(jacksonMapper.readTree("""{"url":"file:///etc/passwd"}"""))
     assertThat((result as ToolResult.Error).code).isEqualTo("INVALID_URL")
   }

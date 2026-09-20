@@ -14,6 +14,7 @@ dependencies {
   // логика извлечения вынесена в отдельный модуль (implementation main не транзитивен)
   implementation(projects.meetupInfoExtractor)
   implementation(projects.telegram)
+  implementation(projects.googleCalendar)
   // DTO Update в тестах телеграм-модуля (implementation-депы не транзитивны)
   implementation(libs.telegrambots)
   // Стартеры нужны явно: implementation-депы main не транзитивны

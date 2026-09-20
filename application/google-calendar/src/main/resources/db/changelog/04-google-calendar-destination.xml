@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+  <!-- Файл лежит в модуле application/google-calendar (общий classpath),
+       включается из master.xml модуля meetup-info-extractor. -->
+  <changeSet id="121-seed-google-calendar-destination" author="meetup-flow-agent">
+    <comment>
+      Назначение google_calendar (модуль application/google-calendar): анонсы в
+      Google Calendar через сервисный аккаунт. Сеется ВЫКЛЮЧЕННЫМ — до появления
+      JSON-ключа (ENV GOOGLE_CALENDAR_CREDENTIALS_JSON). Включение:
+      UPDATE destinations SET is_active = true,
+        config = '{"calendarId":"&lt;id календаря&gt;"}'::jsonb WHERE name = 'google_main'.
+    </comment>
+    <sql dbms="postgresql">INSERT INTO destinations (id, type, name, config, is_active)
+      VALUES (gen_random_uuid(), 'google_calendar', 'google_main', '{}'::jsonb, false)
+      ON CONFLICT (name) DO NOTHING</sql>
+  </changeSet>
+
+</databaseChangeLog>

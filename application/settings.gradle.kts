@@ -30,6 +30,7 @@ plugins {
 rootProject.name = "application"
 include("meetup-info-extractor")
 include("telegram")
+include("google-calendar")
 include("main")
 include("test")
 include("evals")

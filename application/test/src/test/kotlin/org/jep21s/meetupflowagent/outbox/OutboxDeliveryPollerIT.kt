@@ -68,7 +68,7 @@ class OutboxDeliveryPollerIT : PostgresTestBase() {
     OutboxDeliveryPoller(outboxRepository, listOf(transport), metrics, scope)
 
   @Test
-  fun `successful delivery marks SENT and counts metric`() = runBlocking {
+  fun `successful delivery marks SENT and counts metric`(): Unit = runBlocking {
     val flowId = flowRepository.create("PROCESSING")
     enqueuePublication(flowId)
     val transport = FlakyTransport(failTimes = 0)
@@ -83,7 +83,7 @@ class OutboxDeliveryPollerIT : PostgresTestBase() {
   }
 
   @Test
-  fun `failing delivery goes back to PENDING with attempts and future retry`() = runBlocking {
+  fun `failing delivery goes back to PENDING with attempts and future retry`(): Unit = runBlocking {
     System.setProperty("outbox.schedule", "1m")
     val flowId = flowRepository.create("PROCESSING")
     enqueuePublication(flowId)
@@ -99,13 +99,12 @@ class OutboxDeliveryPollerIT : PostgresTestBase() {
   }
 
   @Test
-  fun `exhausted attempts mark delivery FAILED_PERMANENT`() = runBlocking {
+  fun `exhausted attempts mark delivery FAILED_PERMANENT`(): Unit = runBlocking {
     System.setProperty("outbox.maxAttempts", "2")
     System.setProperty("outbox.schedule", "1s")
     val flowId = flowRepository.create("PROCESSING")
     enqueuePublication(flowId)
     val poller = poller(FlakyTransport(failTimes = 10))
-
     poller.pollOnce()
     awaitDelivery(flowId) { it.status == "PENDING" }
 
@@ -121,8 +120,10 @@ class OutboxDeliveryPollerIT : PostgresTestBase() {
   }
 
   @Test
-  fun `unknown transport type fails permanently with UNSUPPORTED_TRANSPORT`() = runBlocking {
-    executeSql("UPDATE destinations SET type = 'google_calendar' WHERE name = 'telegram_main'")
+  fun `unknown transport type fails permanently with UNSUPPORTED_TRANSPORT`(): Unit = runBlocking {
+    // google_calendar уже реализован (application/google-calendar) — «неизвестным»
+    // берём тип, для которого транспорта нет и не планируется
+    executeSql("UPDATE destinations SET type = 'future_channel' WHERE name = 'telegram_main'")
     val flowId = flowRepository.create("PROCESSING")
     enqueuePublication(flowId)
 
@@ -131,7 +132,7 @@ class OutboxDeliveryPollerIT : PostgresTestBase() {
     awaitDelivery(flowId) { it.status == "FAILED_PERMANENT" }
     val delivery = outboxRepository.deliveriesByFlow(flowId).single()
     assertThat(delivery.lastError).contains("UNSUPPORTED_TRANSPORT")
-    assertThat(delivery.lastError).contains("google_calendar")
+    assertThat(delivery.lastError).contains("future_channel")
     assertThat(counter("unsupported")).isEqualTo(1.0)
   }
 

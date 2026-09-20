@@ -13,6 +13,7 @@ dependencies {
   // логика извлечения вынесена в отдельный модуль (implementation main не транзитивен)
   implementation(projects.meetupInfoExtractor)
   implementation(projects.telegram)
+  implementation(projects.googleCalendar)
   implementation("org.jep21s.meetupflowagent.libs:config-starter")
   implementation("org.jep21s.meetupflowagent.libs:jackson-starter")
   implementation("org.jep21s.meetupflowagent.libs:logging-starter")

@@ -11,7 +11,7 @@ import org.junit.jupiter.api.assertThrows
 class FakeChatClientContractTest {
 
   @Test
-  fun `serves scripted responses in order and records requests`() = runBlocking {
+  fun `serves scripted responses in order and records requests`(): Unit = runBlocking {
     val fake = FakeChatClient(
       FakeChatClient.text("первый"),
       FakeChatClient.text("второй"),
@@ -25,7 +25,7 @@ class FakeChatClientContractTest {
   }
 
   @Test
-  fun `script exhaustion fails loudly`() = runBlocking {
+  fun `script exhaustion fails loudly`(): Unit = runBlocking {
     val fake = FakeChatClient(FakeChatClient.text("единственный"))
     fake.complete(ChatCompletionRequest(model = "m", messages = listOf(ChatMessage.user("u"))))
 
