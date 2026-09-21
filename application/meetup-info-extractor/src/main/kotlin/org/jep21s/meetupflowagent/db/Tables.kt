@@ -71,6 +71,7 @@ object Events : Table("events") {
   val endsAt: Column<java.time.Instant?> = timestamp("ends_at").nullable()
   val talks: Column<JsonNode?> = jsonbNullable("talks")
   val registrationUrl: Column<String?> = varchar("registration_url", 1024).nullable()
+  val registrationNotRequired: Column<Boolean?> = bool("registration_not_required").nullable()
   val sourceUrls: Column<JsonNode?> = jsonbNullable("source_urls")
   val language: Column<String?> = varchar("language", 8).nullable()
   val confidence: Column<Double?> = double("confidence").nullable()

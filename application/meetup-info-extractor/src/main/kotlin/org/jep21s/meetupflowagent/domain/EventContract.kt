@@ -30,6 +30,8 @@ data class EventContractDto(
   val endsAt: String? = null,
   val talks: List<TalkDto> = emptyList(),
   val registrationUrl: String? = null,
+  /** Явное «регистрация не требуется» — из сообщения/страницы либо подтверждение человека (ask_human). */
+  val registrationNotRequired: Boolean? = null,
   val sourceUrls: List<String> = emptyList(),
   val language: String? = null,
   val confidence: Double? = null,

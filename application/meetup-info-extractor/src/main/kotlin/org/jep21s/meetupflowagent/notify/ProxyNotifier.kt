@@ -5,6 +5,12 @@ import java.util.UUID
 /** Событие HITL-вопроса: единственное с options; доставляется только в личные чаты активных users. */
 const val EVENT_HUMAN_INPUT_REQUIRED = "HUMAN_INPUT_REQUIRED"
 
+/** Флоу завершён вердиктом NEEDS_REVIEW (данные неполны/сомнение в дубле) — уведомить людей. */
+const val EVENT_FLOW_NEEDS_REVIEW = "FLOW_NEEDS_REVIEW"
+
+/** Флоу отклонён (не СПб/платное/online-only/guardrails) — уведомить людей. */
+const val EVENT_FLOW_REJECTED = "FLOW_REJECTED"
+
 /** Уведомление telegram-слою (§11): событие флоу + текст + адресаты. */
 data class ProxyNotification(
   val flowId: UUID,

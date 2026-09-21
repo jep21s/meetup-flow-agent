@@ -16,9 +16,11 @@ class ContractValidatorTest {
     endsAt: String? = "2026-10-02T22:00+03:00",
     venueName: String? = "Севкабель Порт",
     registrationUrl: String? = "https://example.com",
+    registrationNotRequired: Boolean? = null,
   ) = EventContractDto(
     title = title, city = city, isFree = isFree, price = price, formats = formats,
     startsAt = startsAt, endsAt = endsAt, venueName = venueName, registrationUrl = registrationUrl,
+    registrationNotRequired = registrationNotRequired,
   )
 
   @Test
@@ -61,6 +63,21 @@ class ContractValidatorTest {
     val v = ContractValidator.validate(dto(registrationUrl = null)).verdict
     assertThat(v.status).isEqualTo(VerdictStatus.NEEDS_REVIEW)
     assertThat(v.reasons).contains("MISSING_DATA")
+  }
+
+  @Test
+  fun `registration not required replaces missing url - APPROVED`() {
+    // из сообщения/страницы либо подтверждение человека (ask_human): явный флаг
+    // заменяет отсутствующий registrationUrl, MISSING_DATA не возникает
+    val validated = ContractValidator.validate(dto(registrationUrl = null, registrationNotRequired = true))
+    assertThat(validated.verdict.status).isEqualTo(VerdictStatus.APPROVED)
+    assertThat(validated.verdict.reasons).isEmpty()
+  }
+
+  @Test
+  fun `url wins over flag - both present is APPROVED`() {
+    val validated = ContractValidator.validate(dto(registrationUrl = "https://timepad.ru/x", registrationNotRequired = true))
+    assertThat(validated.verdict.status).isEqualTo(VerdictStatus.APPROVED)
   }
 
   @Test

@@ -33,6 +33,7 @@
       }
     },
     "registrationUrl": { "type": ["string", "null"] },
+    "registrationNotRequired": { "type": ["boolean", "null"] },
     "sourceUrls": { "type": "array", "items": { "type": "string" } },
     "language": { "type": ["string", "null"] },
     "verdict": {

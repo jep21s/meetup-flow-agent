@@ -75,7 +75,10 @@ class TelegramOutboxTransport(
         .filter { it.isNotBlank() }
         .joinToString(", ")
       if (place.isNotBlank()) appendLine("📍 $place")
-      payload.event.registrationUrl?.takeIf { it.isNotBlank() }?.let { appendLine("🔗 $it") }
+      when {
+        !payload.event.registrationUrl.isNullOrBlank() -> appendLine("🔗 ${payload.event.registrationUrl}")
+        payload.event.registrationNotRequired == true -> appendLine("🎟 Регистрация не требуется")
+      }
       payload.event.organizer?.takeIf { it.isNotBlank() }?.let { appendLine("👤 $it") }
       payload.event.description
         ?.takeIf { it.isNotBlank() }
@@ -83,7 +86,10 @@ class TelegramOutboxTransport(
       if (payload.event.tags.isNotEmpty()) {
         appendLine(payload.event.tags.joinToString(" ") { "#${it.replace(' ', '_')}" })
       }
-      append("Вход бесплатный, участие после регистрации.")
+      append(
+        if (payload.event.registrationNotRequired == true) "Вход бесплатный, регистрация не нужна."
+        else "Вход бесплатный, участие после регистрации.",
+      )
     }
   }
 }

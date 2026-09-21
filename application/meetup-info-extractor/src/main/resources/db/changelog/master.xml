@@ -13,5 +13,6 @@
   <include file="03-telegram-questions.xml" relativeToChangelogFile="true"/>
   <!-- файл лежит в модуле application/google-calendar (общий classpath) -->
   <include file="04-google-calendar-destination.xml" relativeToChangelogFile="true"/>
+  <include file="05-registration-not-required.xml" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

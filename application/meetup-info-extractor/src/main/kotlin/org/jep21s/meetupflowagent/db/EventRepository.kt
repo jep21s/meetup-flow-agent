@@ -42,6 +42,7 @@ data class EventRow(
   val endsAt: Instant? = null,
   val talks: JsonNode? = null,
   val registrationUrl: String? = null,
+  val registrationNotRequired: Boolean? = null,
   val sourceUrls: JsonNode? = null,
   val language: String? = null,
   val confidence: Double? = null,
@@ -98,6 +99,7 @@ class EventRepository(private val db: DatabaseConnectivity) {
       it[endsAt] = event.endsAt
       it[talks] = event.talks
       it[registrationUrl] = event.registrationUrl
+      it[registrationNotRequired] = event.registrationNotRequired
       it[sourceUrls] = event.sourceUrls
       it[language] = event.language
       it[confidence] = event.confidence
@@ -191,6 +193,7 @@ class EventRepository(private val db: DatabaseConnectivity) {
     endsAt = this[Events.endsAt],
     talks = this[Events.talks],
     registrationUrl = this[Events.registrationUrl],
+    registrationNotRequired = this[Events.registrationNotRequired],
     sourceUrls = this[Events.sourceUrls],
     language = this[Events.language],
     confidence = this[Events.confidence],

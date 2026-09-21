@@ -112,7 +112,10 @@ class GoogleCalendarOutboxTransport(
         ?.joinToString(", ")
 
     private fun description(event: PublishedEvent): String? = buildString {
-      event.registrationUrl?.takeIf { it.isNotBlank() }?.let { appendLine("Регистрация: $it") }
+      when {
+        !event.registrationUrl.isNullOrBlank() -> appendLine("Регистрация: ${event.registrationUrl}")
+        event.registrationNotRequired == true -> appendLine("Регистрация: не требуется")
+      }
       event.organizer?.takeIf { it.isNotBlank() }?.let { appendLine("Организатор: $it") }
       event.description?.takeIf { it.isNotBlank() }?.let {
         if (isNotEmpty()) appendLine()
