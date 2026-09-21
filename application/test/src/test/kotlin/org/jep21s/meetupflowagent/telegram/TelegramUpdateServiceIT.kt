@@ -66,6 +66,7 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
   fun clearSourceFilterOverrides() {
     System.clearProperty("telegram.source.chat-id")
     System.clearProperty("telegram.source.topic-id")
+    System.clearProperty("telegram.sources")
     System.clearProperty("telegram.main.chat-id")
   }
 
@@ -187,6 +188,41 @@ class TelegramUpdateServiceIT : PostgresTestBase() {
     svc.handle(textUpdateJson(updateId = 13, text = "не тот топик", threadId = 9))
 
     assertThat(inboxByKey("tg-13")).isNull()
+  }
+
+  @Test
+  fun `message from extra source chat without topic becomes flow`() = runTest {
+    // telegram.sources складывается с парой chat-id/topic-id (100/7)
+    System.setProperty("telegram.sources", "300")
+    val svc = service()
+
+    svc.handle(textUpdateJson(updateId = 30, text = "форвард старого анонса", chatId = 300L, threadId = null))
+
+    val inserted = inboxByKey("tg-30")
+    assertThat(inserted).isNotNull
+    assertThat(inserted!!.first).contains("\"update_id\":30")
+  }
+
+  @Test
+  fun `extra source with topic accepts only that topic`() = runTest {
+    System.setProperty("telegram.sources", "300:5")
+    val svc = service()
+
+    svc.handle(textUpdateJson(updateId = 31, text = "не тот топик", chatId = 300L, threadId = 9))
+    svc.handle(textUpdateJson(updateId = 32, text = "тот топик", chatId = 300L, threadId = 5))
+
+    assertThat(inboxByKey("tg-31")).isNull()
+    assertThat(inboxByKey("tg-32")).isNotNull
+  }
+
+  @Test
+  fun `malformed sources entry skipped - valid one works`() = runTest {
+    System.setProperty("telegram.sources", "abc,300")
+    val svc = service()
+
+    svc.handle(textUpdateJson(updateId = 33, text = "привет", chatId = 300L, threadId = null))
+
+    assertThat(inboxByKey("tg-33")).isNotNull
   }
 
   @Test

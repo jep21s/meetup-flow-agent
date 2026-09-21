@@ -67,7 +67,8 @@ Kotlin/Ktor-сервис. Каркас: Gradle composite builds + Koin annotatio
   отправка по командам основного сервиса `POST /api/send|callback-answer|
   message-keyboard-remove` (`Authorization: Bearer {PROXY_TOKEN}`)
 - **Все решения — модуль application/telegram** основного сервиса: фильтр
-  источника (`telegram.source.chat-id` + `topic-id`), команды (/start), HITL
+  источников (`telegram.sources` = chatId[:topicId] через запятую + пара
+  `telegram.source.chat-id`/`topic-id`), команды (/start), HITL
   (кнопки `hitl:<flowId>:<idx>` / reply по таблице telegram_questions →
   `human_requests.submitAnswer` + резюм флоу; автор ответа — allowlist по
   активным users), passthrough в inbox extractor'а с `idempotencyKey =

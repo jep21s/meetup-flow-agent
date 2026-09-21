@@ -35,6 +35,11 @@
   `HUMAN_INPUT_REQUIRED` → вопрос не отправляется (error-лог), флоу закроется
   по `human.timeoutHours`; общий канал — fallback только для
   `REMINDER`/`FLOW_FAILED` (§2.4 и §11 частично устарели).
+- **Мульти-источники passthrough** (бэкфилл старых анонсов форвардами во
+  временную группу): `telegram.sources` = `chatId[:topicId]` через запятую,
+  складывается с парой `telegram.source.*`; медиа с caption тоже уходит в
+  passthrough (модель видит весь апдейт). Временное расширение — откатывается
+  очисткой `TELEGRAM_SOURCES`.
 
 ## 1. Цель и роли
 

@@ -176,8 +176,10 @@ telegrambots) на Railway — **«тупая труба» без логики**
 
 Все решения — в модуле `application/telegram` основного сервиса:
 
-- **Вход**: фильтр источника (`TELEGRAM_SOURCE_CHAT_ID` + `TELEGRAM_SOURCE_TOPIC_ID`,
-  message_thread_id; пустые значения — фильтр выключен, прочие чаты игнорируются);
+- **Вход**: фильтр источников (`TELEGRAM_SOURCES` = `chatId[:topicId]` через
+  запятую, без topicId — вся группа; складывается с парой
+  `TELEGRAM_SOURCE_CHAT_ID` + `TELEGRAM_SOURCE_TOPIC_ID`; всё пусто — фильтр
+  выключен, прочие чаты игнорируются);
   прошедшее фильтр — сырой passthrough в inbox с `idempotencyKey = "tg-<updateId>"`
   (дубли глушатся) → флоу извлечения;
 - **HITL**: вопрос идёт кнопками (`hitl:<flowId>:<idx>`), заданные вопросы — в

@@ -24,6 +24,37 @@ private val logger = KotlinLogging.logger { }
 
 private const val CALLBACK_PREFIX = "hitl:"
 
+/** Источник passthrough: чат и (опционально) топик; null = ограничение не задано. */
+internal data class TelegramSource(val chatId: Long?, val topicId: Long?)
+
+/**
+ * Источники passthrough: `telegram.sources` = "chatId[:topicId],..." (без
+ * topicId — вся группа) плюс устаревшая пара `telegram.source.chat-id/topic-id`
+ * как ещё один источник. Битые entry (без chatId) пропускаются с warn.
+ */
+private fun parseSources(): List<TelegramSource> {
+  val listed = ConfigLoader.getProperty("telegram.sources")
+    .split(',')
+    .map { it.trim() }
+    .filter { it.isNotEmpty() }
+    .mapNotNull { entry ->
+      val parts = entry.split(':')
+      val chatId = parts.getOrNull(0)?.trim()?.toLongOrNull()
+      if (chatId == null) {
+        logger.warn { "telegram.sources entry skipped (chat id expected): '$entry'" }
+        null
+      } else {
+        TelegramSource(chatId, parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }?.toLongOrNull())
+      }
+    }
+  val legacy = TelegramSource(
+    ConfigLoader.getProperty("telegram.source.chat-id").trim().toLongOrNull(),
+    ConfigLoader.getProperty("telegram.source.topic-id").trim().toLongOrNull(),
+  )
+  return if (legacy.chatId == null && legacy.topicId == null) listed.distinct()
+  else (listed + legacy).distinct()
+}
+
 /**
  * Мозг входящего Telegram-потока (раньше жил в telegram-proxy): принимает сырой
  * JSON апдейта от прокси и решает, что с ним делать.
@@ -33,7 +64,8 @@ private const val CALLBACK_PREFIX = "hitl:"
  * 2. reply на заданный вопрос (telegram_questions) — свободный текст как ответ;
  *    автор ответа (оба пути) проходит allowlist — активные `users`;
  * 3. команды `/...` — локальные (приветствие /start), агенту не идут;
- * 4. message/channelPost из источника (telegram.source.chat-id + topic-id) —
+ * 4. message/channelPost из источника (telegram.sources: chatId[:topicId],
+ *    запятая; + пара telegram.source.chat-id/topic-id) —
  *    сырой passthrough: ВСЯ DTO Update как text в inbox (idempotencyKey
  *    "tg-<updateId>") + флоу PROCESSING — дальше работает meetup-info-extractor;
  *    не-текстовые сообщения (медиа с caption и т.п.) НЕ отсеиваются — текст
@@ -52,8 +84,15 @@ class TelegramUpdateService(
   @Named("applicationCoroutineScope") private val scope: CoroutineScope,
 ) {
 
-  private val sourceChatId = ConfigLoader.getProperty("telegram.source.chat-id").trim().toLongOrNull()
-  private val sourceTopicId = ConfigLoader.getProperty("telegram.source.topic-id").trim().toLongOrNull()
+  private val sources: List<TelegramSource> = parseSources()
+
+  init {
+    logger.info {
+      "telegram passthrough sources: " + sources.joinToString {
+        "chat=${it.chatId ?: '*'}" + (it.topicId?.let { t -> "/topic=$t" } ?: "")
+      }.ifEmpty { "(none — filter off)" }
+    }
+  }
 
   suspend fun handle(rawUpdateJson: String) {
     val update = try {
@@ -95,7 +134,7 @@ class TelegramUpdateService(
       }
     }
 
-    // сырой passthrough — только из заданной группы/топика; прочие чаты игнорируются
+    // сырой passthrough — только из заданных групп/топиков; прочие чаты игнорируются
     if (!isFromSourceChatTopic(message)) {
       logger.info {
         "message outside source chat/topic — ignored: updateId=${update.updateId} " +
@@ -217,10 +256,10 @@ class TelegramUpdateService(
     }
   }
 
-  /** Сообщение из заданного источника (группа/топик); незаданное ограничение не проверяется. */
-  internal fun isFromSourceChatTopic(message: Message): Boolean {
-    val chatOk = sourceChatId == null || message.chat?.id == sourceChatId
-    val topicOk = sourceTopicId == null || message.messageThreadId?.toLong() == sourceTopicId
-    return chatOk && topicOk
-  }
+  /** Сообщение из одного из заданных источников; незаданное ограничение не проверяется. */
+  internal fun isFromSourceChatTopic(message: Message): Boolean =
+    sources.any { source ->
+      (source.chatId == null || message.chat?.id == source.chatId) &&
+        (source.topicId == null || message.messageThreadId?.toLong() == source.topicId)
+    }
 }
