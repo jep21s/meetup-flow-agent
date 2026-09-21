@@ -67,6 +67,16 @@ class Schedulers(
     startOutboxPoller()
   }
 
+  /**
+   * Глобальный семафор обработки inbox: лимит одновременных флоу по всему
+   * сервису, а не по одному такту поллера (тик не ждёт завершения запущенных
+   * флоу, такты перекрываются). parallelism=1 — строгая последовательность
+   * даже когда флоу длится дольше интервала тика.
+   */
+  private val inboxParallelism = Semaphore(
+    ConfigLoader.getProperty("scheduler.inbox.parallelism", "4").toInt(),
+  )
+
   private fun startInboxPoller() {
     scope.launch(Dispatchers.IO) {
       while (true) {
@@ -88,11 +98,9 @@ class Schedulers(
     )
     if (batch.isEmpty()) return
     logger.info { "inbox claimed ${batch.size} messages" }
-    val parallelism = ConfigLoader.getProperty("scheduler.inbox.parallelism", "4").toInt()
-    val semaphore = Semaphore(parallelism)
     batch.forEach { inbox ->
       scope.launch(Dispatchers.IO) {
-        semaphore.withPermit {
+        inboxParallelism.withPermit {
           try {
             val flowId = inbox.flowId ?: flowRepository.create("PROCESSING", inboxMessageId = inbox.id)
             flowService.executeInboxFlow(flowId, inbox.id, inbox.rawText)
