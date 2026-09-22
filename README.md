@@ -196,8 +196,14 @@ telegrambots) на Railway — **«тупая труба» без логики**
 | Событие | Кому |
 |---|---|
 | `HUMAN_INPUT_REQUIRED` | активные `users` (личные чаты, кнопки); список пуст → вопрос **не** отправляется (не падает в общий канал), флоу закроется по `human.timeoutHours` |
+| `FLOW_NEEDS_REVIEW`, `FLOW_REJECTED` | активные `users`; пусто → общий канал |
 | `REMINDER`, `FLOW_FAILED` | активные `users`; пусто → общий канал |
 | `EVENT_PUBLISHED` | общий канал `TELEGRAM_MAIN_CHAT_ID` |
+
+Регистрация: у события обязателен либо `registrationUrl`, либо явный
+`registrationNotRequired` (из сообщения/страницы либо подтверждение человека
+через ask_human; рендерится как «Регистрация не требуется») — иначе вердикт
+NEEDS_REVIEW/MISSING_DATA.
 
 Список адресатов — таблица `users`, наполняется вручную:
 

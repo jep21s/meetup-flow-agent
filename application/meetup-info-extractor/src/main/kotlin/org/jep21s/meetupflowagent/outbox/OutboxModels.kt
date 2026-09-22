@@ -30,6 +30,8 @@ data class PublishedEvent(
   val address: String? = null,
   val city: String? = null,
   val registrationUrl: String? = null,
+  /** Явное «регистрация не требуется» — рендерится вместо ссылки. */
+  val registrationNotRequired: Boolean? = null,
   val description: String? = null,
   val organizer: String? = null,
   val tags: List<String> = emptyList(),
@@ -63,6 +65,7 @@ fun buildPublicationPayload(messageId: UUID, event: EventRow, finishedAt: Instan
         address = event.address,
         city = event.city,
         registrationUrl = event.registrationUrl,
+        registrationNotRequired = event.registrationNotRequired,
         description = event.description,
         organizer = event.organizer,
         tags = event.formats,

@@ -12,6 +12,7 @@ import org.jep21s.meetupflowagent.db.FlowRepository
 import org.jep21s.meetupflowagent.db.FlowStepRepository
 import org.jep21s.meetupflowagent.db.FlowStepType
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import org.jep21s.meetupflowagent.guardrails.GuardrailsService
 import org.jep21s.meetupflowagent.guardrails.GuardrailsVerdict
@@ -156,6 +157,45 @@ class AgentFlowServiceIT : PostgresTestBase() {
     assertThat(result.eventId).isNull()
     // отклонённый результат НЕ публикуется
     assertThat(runBlocking { outboxRepository.deliveriesByFlow(result.flowId) }).isEmpty()
+    // вердикт ушёл людям (REJECTED больше не молчит)
+    coVerify {
+      noopNotifier.notify(
+        match { it.event == org.jep21s.meetupflowagent.notify.EVENT_FLOW_REJECTED && it.text.contains("PAID") },
+      )
+    }
+  }
+
+  @Test
+  fun `needs review flow notifies users with reasons`() {
+    // ни registrationUrl, ни registrationNotRequired → MISSING_DATA от валидатора
+    fake.enqueue(FakeChatClient.text(approvedJson().replace("\"registrationUrl\":\"https://piterjs.org\",", "")))
+
+    val result = runBlocking { service(ScriptedEmbedder(unit(2))).run("митап без данных о регистрации") }
+
+    assertThat(result.verdictStatus.name).isEqualTo("NEEDS_REVIEW")
+    assertThat(result.reasons).contains("MISSING_DATA")
+    coVerify {
+      noopNotifier.notify(
+        match { it.event == org.jep21s.meetupflowagent.notify.EVENT_FLOW_NEEDS_REVIEW && it.text.contains("MISSING_DATA") },
+      )
+    }
+  }
+
+  @Test
+  fun `registration not required publishes event without url`() {
+    fake.enqueue(FakeChatClient.text(noRegistrationJson()))
+
+    val result = runBlocking { service(ScriptedEmbedder(unit(3))).run("митап без регистрации") }
+
+    assertThat(result.verdictStatus.name).isEqualTo("APPROVED")
+    assertThat(result.eventId).isNotNull
+    val event = runBlocking { eventRepository.findById(result.eventId!!) }
+    assertThat(event!!.registrationNotRequired).isTrue
+    // опубликован (outbox-задания созданы)
+    assertThat(runBlocking { outboxRepository.deliveriesByFlow(result.flowId) }).isNotEmpty
+    coVerify(exactly = 0) {
+      noopNotifier.notify(match { it.event == org.jep21s.meetupflowagent.notify.EVENT_FLOW_NEEDS_REVIEW })
+    }
   }
 
   @Test
@@ -329,6 +369,14 @@ class AgentFlowServiceIT : PostgresTestBase() {
     """{"title":"Heisenbug","city":"Санкт-Петербург","isFree":false,"price":"от 3500 ₽",
        "formats":["OFFLINE"],"startsAt":"2026-11-14T10:00+03:00","endsAt":"2026-11-14T18:00+03:00",
        "venueName":"Конгресс-холл","registrationUrl":"https://heisenbug.ru"}"""
+
+  /** Явное «регистрация не требуется» вместо URL (из сообщения либо ответа человека). */
+  private fun noRegistrationJson() =
+    """{"title":"Coffee&Code QA","description":"митап без регистрации","organizer":"Coffee&Code",
+       "city":"Санкт-Петербург","isFree":true,"formats":["OFFLINE"],
+       "address":"Невский пр., 182","venueName":"ГастроБар ИнДюк",
+       "startsAt":"2026-10-09T19:00+03:00","endsAt":"2026-10-09T22:00+03:00",
+       "registrationNotRequired":true,"language":"RU","confidence":0.9}"""
 
   /** Детерминированный единичный вектор заданной размерности. */
   private fun unit(seed: Long, dim: Int = 768): FloatArray {

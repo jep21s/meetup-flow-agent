@@ -10,8 +10,9 @@ import java.time.OffsetDateTime
  * Правила:
  * - REJECTED: платное (isFree=false или цена), не СПб (город после нормализации),
  *   нет офлайн-формата;
- * - NEEDS_REVIEW: нет обязательных title/startsAt/city либо отсутствует
- *   registrationUrl или площадка (venueName+address) (MISSING_DATA);
+ * - NEEDS_REVIEW: нет обязательных title/startsAt/city, отсутствует площадка
+ *   (venueName+address) либо про регистрацию ничего не известно — нет ни
+ *   registrationUrl, ни явного registrationNotRequired (MISSING_DATA);
  *   endsAt НЕ обязателен — страницы мероприятий часто не публикуют время
  *   окончания, канал доставки применяет дефолтную длительность;
  * - иначе APPROVED.
@@ -50,8 +51,11 @@ object ContractValidator {
       review += "BAD_STARTS_AT"
     }
     // venueName некритичен при известном address (Площадь Конституции, 2 — адрес и есть площадка);
-    // endsAt не обязателен — конец добирается дефолтной длительностью канала доставки
-    if (dto.registrationUrl.isNullOrBlank() ||
+    // endsAt не обязателен — конец добирается дефолтной длительностью канала доставки;
+    // регистрация известна, если есть URL ИЛИ явное «регистрация не требуется»
+    // (registrationNotRequired — из сообщения/страницы либо подтверждение человека)
+    val registrationKnown = !dto.registrationUrl.isNullOrBlank() || dto.registrationNotRequired == true
+    if (!registrationKnown ||
       (dto.venueName.isNullOrBlank() && dto.address.isNullOrBlank())
     ) {
       review += "MISSING_DATA"

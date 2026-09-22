@@ -32,6 +32,8 @@ import org.jep21s.meetupflowagent.llm.EmbeddingClient
 import org.jep21s.meetupflowagent.llm.EmbeddingException
 import org.jep21s.meetupflowagent.llm.LlmClient
 import org.jep21s.meetupflowagent.llm.LlmException
+import org.jep21s.meetupflowagent.notify.EVENT_FLOW_NEEDS_REVIEW
+import org.jep21s.meetupflowagent.notify.EVENT_FLOW_REJECTED
 import org.jep21s.meetupflowagent.notify.EVENT_HUMAN_INPUT_REQUIRED
 import org.jep21s.meetupflowagent.notify.ProxyNotification
 import org.jep21s.meetupflowagent.scheduler.RetrySchedule
@@ -238,6 +240,7 @@ class AgentFlowService(
         },
       )
       logger.warn { "flow rejected by guardrails: flowId=$flowId verdict=${guardrailsVerdict.verdict} reasons=$reasons" }
+      notifyVerdict(flowId, EVENT_FLOW_REJECTED, null, reasons)
       val result = FlowResult(
         flowId = flowId,
         status = FlowStatus.REJECTED,
@@ -423,6 +426,7 @@ class AgentFlowService(
         lastError = "final answer is not a valid contract: ${e.message?.take(200)}",
         verdict = verdictJson(verdict),
       )
+      notifyVerdict(flowId, EVENT_FLOW_NEEDS_REVIEW, null, verdict.reasons)
       return FlowResult(flowId, FlowStatus.COMPLETED, VerdictStatus.NEEDS_REVIEW, verdict.reasons, reply = finalText, toolCalls = toolCallsLog, iterations = iterations)
     }
 
@@ -431,6 +435,7 @@ class AgentFlowService(
       FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.REJECTED)
       flowRepository.updateStatus(flowId, FlowStatus.REJECTED.name, verdict = verdictJson(validated.verdict))
       logger.info { "flow rejected: flowId=$flowId reasons=${validated.verdict.reasons}" }
+      notifyVerdict(flowId, EVENT_FLOW_REJECTED, parsed.dto.title, validated.verdict.reasons)
       return FlowResult(flowId, FlowStatus.REJECTED, VerdictStatus.REJECTED, validated.verdict.reasons, reply = finalText, toolCalls = toolCallsLog, iterations = iterations)
     }
 
@@ -452,6 +457,7 @@ class AgentFlowService(
       val verdict = Verdict(VerdictStatus.NEEDS_REVIEW, reasons.distinct())
       FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.COMPLETED)
       flowRepository.updateStatus(flowId, FlowStatus.COMPLETED.name, verdict = verdictJson(verdict))
+      notifyVerdict(flowId, EVENT_FLOW_NEEDS_REVIEW, parsed.dto.title, verdict.reasons)
       return FlowResult(flowId, FlowStatus.COMPLETED, VerdictStatus.NEEDS_REVIEW, reasons.distinct(), similarity = top!!.similarity, reply = finalText, toolCalls = toolCallsLog, iterations = iterations)
     }
 
@@ -470,6 +476,7 @@ class AgentFlowService(
     // NEEDS_REVIEW от валидатора: событие НЕ создаётся (§8 маппинг)
     FlowTransitions.checkTransition(FlowStatus.PROCESSING, FlowStatus.COMPLETED)
     flowRepository.updateStatus(flowId, FlowStatus.COMPLETED.name, verdict = verdictJson(validated.verdict))
+    notifyVerdict(flowId, EVENT_FLOW_NEEDS_REVIEW, parsed.dto.title, validated.verdict.reasons)
     return FlowResult(flowId, FlowStatus.COMPLETED, VerdictStatus.NEEDS_REVIEW, validated.verdict.reasons, similarity = top?.similarity, reply = finalText, toolCalls = toolCallsLog, iterations = iterations)
   }
 
@@ -523,6 +530,7 @@ class AgentFlowService(
     endsAt = validated.endsAtInstant,
     talks = dto.talks.takeIf { it.isNotEmpty() }?.let { jacksonMapper.valueToTree<JsonNode>(it) },
     registrationUrl = dto.registrationUrl,
+    registrationNotRequired = dto.registrationNotRequired,
     sourceUrls = dto.sourceUrls.takeIf { it.isNotEmpty() }?.let { jacksonMapper.valueToTree<JsonNode>(it) },
     language = dto.language,
     confidence = dto.confidence,
@@ -568,6 +576,29 @@ class AgentFlowService(
           "Можешь попробовать другую ссылку или продолжить без этих данных.",
       )
     }
+  }
+
+  /**
+   * Уведомление о финальном вердикте флоу (NEEDS_REVIEW/REJECTED) — в личные
+   * чаты активных users (пустой список → общий канал, кроме HITL-логики нотификатора).
+   * Итог флоу больше не «молчит»: человек видит, что осталось проверить/отклонено.
+   */
+  private suspend fun notifyVerdict(flowId: UUID, event: String, title: String?, reasons: List<String>) {
+    proxyNotifier.notify(
+      ProxyNotification(
+        flowId = flowId,
+        event = event,
+        userIds = usersRepository.activeTelegramUserIds(),
+        text = buildString {
+          append(if (event == EVENT_FLOW_REJECTED) "❌ Митап отклонён: " else "🔎 Митап требует проверки: ")
+          append(title?.take(120)?.ifBlank { null } ?: "название не извлечено")
+          append(" — ")
+          append(reasons.joinToString(", "))
+          append("\nflowId=")
+          append(flowId)
+        },
+      ),
+    )
   }
 
   /**
@@ -662,6 +693,7 @@ class AgentFlowService(
         verdict = verdictJson(verdict),
       )
       metrics.flowStatus(FlowStatus.COMPLETED.name)
+      notifyVerdict(flowId, EVENT_FLOW_NEEDS_REVIEW, null, verdict.reasons)
       return FlowResult(flowId, FlowStatus.COMPLETED, VerdictStatus.NEEDS_REVIEW, verdict.reasons, reply = answer)
     }
 
